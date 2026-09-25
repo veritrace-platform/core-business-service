@@ -1,0 +1,76 @@
+# core-business-service
+
+The VeriTrace core REST API. It covers:
+
+- tenants, identity, and access control;
+- the GS1 catalog (GLN, GTIN);
+- lots and inventory;
+- shipments (SSCC), custody handover, and emergency recall;
+- the tamper-evident shipment event log, published to Kafka.
+
+Platform documentation, including the architecture, domain rules, contracts, and ADRs, lives in
+[`platform-infrastructure/docs`](https://github.com/veritrace-platform/platform-infrastructure/tree/main/docs).
+
+## Requirements
+
+- Go 1.27 (`GOTOOLCHAIN=auto` downloads it automatically)
+- Docker, for integration tests and the local environment
+- The local environment from `platform-infrastructure` (`make up`)
+
+## Getting started
+
+```bash
+cp .env.example .env
+make migrate-up     # create or upgrade the schema (owner role)
+make run            # API on :8080, admin on :8081
+```
+
+Requests normally go through the gateway on `http://localhost:8000`.
+
+## Commands
+
+The binary exposes these subcommands:
+
+| Command | Purpose |
+| --- | --- |
+| `serve` | Run the REST API and the admin server |
+| `migrate up\|down\|status` | Manage the database schema |
+| `healthcheck` | Probe the admin server (used by container health checks) |
+| `version` | Print the build version |
+
+## Configuration
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `APP_ENV` | `development` | `development` or `production` |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+| `HTTP_ADDR` | `:8080` | Public API listener |
+| `ADMIN_ADDR` | `:8081` | `/healthz`, `/readyz`, `/metrics` listener (never exposed publicly) |
+| `DATABASE_URL` | — | Runtime role connection (`veritrace_core_app`) |
+| `MIGRATIONS_DATABASE_URL` | — | Owner role connection (`veritrace_core_owner`), used by `migrate` only |
+| `SHUTDOWN_TIMEOUT` | `15s` | Graceful shutdown budget |
+
+## Project layout
+
+```
+cmd/core-business-service/   entry point and wiring
+internal/httpapi/            REST router and /api/v1 route registration
+internal/<domain>/           domain packages (added per story)
+internal/platform/           config, logging, trace context, HTTP plumbing, admin, database, migrations
+migrations/                  goose SQL migrations (embedded)
+api/openapi.yaml             REST contract
+```
+
+## Development
+
+```bash
+make test               # unit tests
+make test-integration   # unit + integration tests (Docker)
+make lint               # golangci-lint
+make openapi-lint       # validate api/openapi.yaml
+make help               # all targets
+```
+
+## License
+
+[MIT](LICENSE)
