@@ -9,7 +9,7 @@ The VeriTrace core REST API. It covers:
 - the tamper-evident shipment event log, published to Kafka.
 
 Platform documentation, including the architecture, domain rules, contracts, and ADRs, lives in
-[`platform-infrastructure/docs`](https://github.com/veritrace-platform/platform-infrastructure/tree/main/docs).
+[`veritrace/docs`](https://github.com/veritrace-platform/veritrace/tree/main/docs).
 
 ## Requirements
 
