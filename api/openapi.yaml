@@ -5,7 +5,7 @@ info:
   summary: Tenants, identity, GS1 catalog, lots, inventory, shipments, custody handover, and recall.
   description: |
     Conventions, error codes, and the endpoint inventory are defined in
-    `platform-infrastructure/docs/contracts/rest-api.md`. Each endpoint's schema is added here together
+    `veritrace/docs/contracts/rest-api.md`. Each endpoint's schema is added here together
     with its implementation (contract first).
   license:
     name: MIT
