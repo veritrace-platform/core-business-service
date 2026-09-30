@@ -116,13 +116,18 @@ func TestValidateRejectsUnknownKind(t *testing.T) {
 }
 
 func TestValidateCompanyPrefix(t *testing.T) {
-	for gcp, valid := range map[string]bool{
-		"893000": true, "8930001": true, "8930001234": true,
-		"89300": false, "89300012345": false, "89300A1": false, "": false,
+	for gcp, want := range map[string]gs1.Reason{
+		"893000": "", "8930001": "", "8930001234": "",
+		"89300": gs1.ReasonLength, "89300012345": gs1.ReasonLength, "": gs1.ReasonLength,
+		"89300A1": gs1.ReasonNonNumeric,
 	} {
 		err := gs1.ValidateCompanyPrefix(gcp)
-		if valid != (err == nil) || (err != nil && !errors.Is(err, gs1.ErrInvalidCompanyPrefix)) {
-			t.Errorf("ValidateCompanyPrefix(%q) error = %v, want valid = %t", gcp, err, valid)
+		var invalid *gs1.InvalidKeyError
+		switch {
+		case want == "" && err != nil:
+			t.Errorf("ValidateCompanyPrefix(%q) error = %v", gcp, err)
+		case want != "" && (!errors.As(err, &invalid) || invalid.Kind != gs1.GCP || invalid.Reason != want):
+			t.Errorf("ValidateCompanyPrefix(%q) error = %v, want %s", gcp, err, want)
 		}
 	}
 }
@@ -162,24 +167,14 @@ func TestBuildSSCC(t *testing.T) {
 		gcp       string
 		serial    int64
 		want      string
-		wantErr   error
 	}{
-		{0, "8930001", 1, "089300010000000018", nil},
-		{0, "8934567", 1, "089345670000000017", nil},
-		{0, "8930001", 999_999_999, "", nil},
-		{3, "8930001234", 42, "", nil},
-		{0, "8930001", 1_000_000_000, "", gs1.ErrSerialSpaceExhausted},
-		{0, "8930001234", 1_000_000, "", gs1.ErrSerialSpaceExhausted},
-		{0, "893", 1, "", gs1.ErrInvalidCompanyPrefix},
+		{0, "8930001", 1, "089300010000000018"},
+		{0, "8934567", 1, "089345670000000017"},
+		{0, "8930001", 999_999_999, ""},
+		{3, "8930001234", 42, ""},
 	}
 	for _, tt := range tests {
 		got, err := gs1.BuildSSCC(tt.extension, tt.gcp, tt.serial)
-		if tt.wantErr != nil {
-			if !errors.Is(err, tt.wantErr) {
-				t.Errorf("BuildSSCC(%d, %s, %d) error = %v, want %v", tt.extension, tt.gcp, tt.serial, err, tt.wantErr)
-			}
-			continue
-		}
 		if err != nil {
 			t.Fatalf("BuildSSCC(%d, %s, %d) error = %v", tt.extension, tt.gcp, tt.serial, err)
 		}
@@ -190,8 +185,21 @@ func TestBuildSSCC(t *testing.T) {
 			t.Errorf("BuildSSCC(%d, %s, %d) = %s: not a valid SSCC for the prefix (%v)", tt.extension, tt.gcp, tt.serial, got, err)
 		}
 	}
+}
+
+func TestBuildSSCCRejects(t *testing.T) {
+	var invalid *gs1.InvalidKeyError
+	if _, err := gs1.BuildSSCC(0, "8930001", 1_000_000_000); !errors.Is(err, gs1.ErrSerialSpaceExhausted) {
+		t.Errorf("serial past a 7-digit prefix's space: error = %v, want ErrSerialSpaceExhausted", err)
+	}
+	if _, err := gs1.BuildSSCC(0, "8930001234", 1_000_000); !errors.Is(err, gs1.ErrSerialSpaceExhausted) {
+		t.Errorf("serial past a 10-digit prefix's space: error = %v, want ErrSerialSpaceExhausted", err)
+	}
+	if _, err := gs1.BuildSSCC(0, "893", 1); !errors.As(err, &invalid) || invalid.Kind != gs1.GCP {
+		t.Errorf("short prefix: error = %v, want an invalid GCP", err)
+	}
 	if _, err := gs1.BuildSSCC(10, "8930001", 1); err == nil {
-		t.Error("BuildSSCC() accepted a two-digit extension digit")
+		t.Error("two-digit extension digit: error = nil")
 	}
 }
 

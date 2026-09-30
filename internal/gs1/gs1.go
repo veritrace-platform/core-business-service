@@ -15,8 +15,9 @@ import (
 // Kind is a GS1 key type.
 type Kind string
 
-// Key types in use.
+// Key types in use. GCP is the GS1 company prefix that the other keys start with.
 const (
+	GCP    Kind = "GCP"
 	GLN    Kind = "GLN"
 	GTIN14 Kind = "GTIN-14"
 	SSCC   Kind = "SSCC"
@@ -113,14 +114,14 @@ func ValidateSSCC(sscc string) error {
 	return Validate(SSCC, sscc)
 }
 
-// ErrInvalidCompanyPrefix reports a GS1 company prefix that is not 6 to 10 digits.
-var ErrInvalidCompanyPrefix = errors.New("company prefix must be 6 to 10 digits")
-
-// ValidateCompanyPrefix checks the format of a GS1 company prefix (GCP). GS1 member organizations assign
-// prefixes; VeriTrace does not verify the assignment.
+// ValidateCompanyPrefix checks the format of a GS1 company prefix: 6 to 10 digits. GS1 member organizations
+// assign prefixes; VeriTrace does not verify the assignment.
 func ValidateCompanyPrefix(gcp string) error {
-	if len(gcp) < 6 || len(gcp) > 10 || !isDigits(gcp) {
-		return ErrInvalidCompanyPrefix
+	if len(gcp) < 6 || len(gcp) > 10 {
+		return invalid(GCP, ReasonLength, "must be 6 to 10 digits")
+	}
+	if !isDigits(gcp) {
+		return invalid(GCP, ReasonNonNumeric, "must contain only digits")
 	}
 	return nil
 }
