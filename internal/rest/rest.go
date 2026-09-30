@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/veritrace-platform/core-business-service/internal/identity"
 	"github.com/veritrace-platform/core-business-service/internal/platform/httpx"
 )
 
@@ -45,4 +46,14 @@ func Conflict(w http.ResponseWriter, r *http.Request, field, message string) {
 	p := httpx.NewProblem(http.StatusConflict, CodeIdentifierAlreadyRegistered, field+" "+message)
 	p.Errors = []httpx.FieldError{{Field: field, Code: FieldAlreadyRegistered, Message: message}}
 	httpx.WriteProblem(w, r, p)
+}
+
+// Principal returns the authenticated caller of r. Handlers behind the authentication middleware always have
+// one; without it, the request fails closed with 401 UNAUTHENTICATED and ok is false.
+func Principal(w http.ResponseWriter, r *http.Request) (p identity.Principal, ok bool) {
+	if p, ok = identity.FromContext(r.Context()); !ok {
+		httpx.WriteProblem(w, r, httpx.NewProblem(http.StatusUnauthorized, httpx.CodeUnauthenticated,
+			"a bearer access token is required"))
+	}
+	return p, ok
 }

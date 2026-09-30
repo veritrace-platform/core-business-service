@@ -29,3 +29,10 @@ sql:
               import: time
               type: Time
               pointer: true
+  - engine: postgresql
+    schema: migrations
+    queries: internal/auth/queries
+    gen:
+      go:
+        <<: *go
+        out: internal/auth/queries

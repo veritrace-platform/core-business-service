@@ -49,6 +49,9 @@ The binary exposes these subcommands:
 | `DATABASE_URL` | — | Runtime role connection (`veritrace_core_app`) |
 | `MIGRATIONS_DATABASE_URL` | — | Owner role connection (`veritrace_core_owner`), used by `migrate` only |
 | `SHUTDOWN_TIMEOUT` | `15s` | Graceful shutdown budget |
+| `JWT_SIGNING_KEYS` | — | Access token signing keys: comma-separated `<kid>:<base64 of 32 random bytes>` (`openssl rand -base64 32`). The first key signs; all are published in the JWKS, so add the new key first and drop the old one after 15 minutes. |
+| `REFRESH_TOKEN_TTL` | `168h` | Refresh token lifetime; every refresh starts a new period (minimum `1h`) |
+| `TRUSTED_PROXIES` | loopback and private ranges | CIDR ranges whose `X-Forwarded-For` names the client address for rate limits |
 
 ## Project layout
 

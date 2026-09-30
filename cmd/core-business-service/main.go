@@ -83,6 +83,13 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if err := cfg.ValidateServe(); err != nil {
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
+	appCfg, err := app.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("invalid configuration: %w", err)
+	}
+	if err := appCfg.Validate(); err != nil {
+		return fmt.Errorf("invalid configuration: %w", err)
+	}
 
 	pool, err := postgres.NewPool(ctx, cfg.DatabaseURL, buildinfo.ServiceName)
 	if err != nil {
@@ -98,7 +105,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 
 	readiness := admin.NewReadiness(map[string]admin.Check{"postgres": pool.Ping}, 2*time.Second)
 
-	api, err := app.NewHandler(app.Dependencies{Logger: logger, Registerer: registry, Pool: pool})
+	api, err := app.NewHandler(appCfg, app.Dependencies{Logger: logger, Registerer: registry, Pool: pool})
 	if err != nil {
 		return err
 	}

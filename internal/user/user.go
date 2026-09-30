@@ -22,3 +22,18 @@ type User struct {
 	CreatedAt   time.Time     `json:"created_at"`
 	UpdatedAt   time.Time     `json:"updated_at"`
 }
+
+// TenantSummary identifies the tenant of the signed-in user.
+type TenantSummary struct {
+	ID               uuid.UUID `json:"id"`
+	Code             string    `json:"code"`
+	LegalName        string    `json:"legal_name"`
+	GS1CompanyPrefix string    `json:"gs1_company_prefix"`
+	Status           string    `json:"status"`
+}
+
+// Me is the signed-in user with a summary of its tenant.
+type Me struct {
+	User
+	Tenant TenantSummary `json:"tenant"`
+}
