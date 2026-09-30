@@ -100,7 +100,7 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 
 	apiServer := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouter(logger, registry),
+		Handler:           httpapi.NewRouter(logger, registry, httpapi.Mounts{}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
