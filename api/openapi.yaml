@@ -15,8 +15,112 @@ servers:
     description: Local gateway
 security:
   - bearerAuth: []
-tags: []
-paths: {}
+tags:
+  - name: Tenants
+    description: Tenant registration and the tenant profile.
+paths:
+  /api/v1/tenants:
+    post:
+      operationId: registerTenant
+      tags: [Tenants]
+      summary: Register a tenant
+      description: |
+        Creates a tenant with its headquarters location and first admin user, who gets the `ADMIN` role.
+        Public, and limited to 10 requests per minute per client address.
+
+        The headquarters GLN must start with the GS1 company prefix. The prefix must not equal, extend, or be
+        extended by a registered prefix; such a prefix is rejected with `409 IDENTIFIER_ALREADY_REGISTERED` on
+        `tenant.gs1_company_prefix`. Text fields are trimmed.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantRegistrationRequest"
+            example:
+              tenant:
+                code: SGFRESH
+                legal_name: Saigon Fresh Foods Joint Stock Company
+                tax_code: "0312345678"
+                gs1_company_prefix: "8930001"
+              headquarters:
+                gln: "8930001001015"
+                name: Saigon Fresh Foods headquarters
+                address: 12 Nguyen Hue Boulevard, Ben Nghe Ward
+                city: Ho Chi Minh City
+                latitude: 10.773547
+                longitude: 106.703945
+                geo_fence_radius_meters: 200
+              admin:
+                email: admin@sgfresh.example
+                password: correct-horse-battery
+                full_name: Nguyen Van An
+                phone: "+84 28 3822 1234"
+      responses:
+        "201":
+          description: The tenant is registered. `Location` points to the tenant profile.
+          headers:
+            Location:
+              description: Path of the tenant profile.
+              schema:
+                type: string
+                example: /api/v1/tenant
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantRegistration"
+              example:
+                tenant:
+                  id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d8e
+                  code: SGFRESH
+                  legal_name: Saigon Fresh Foods Joint Stock Company
+                  tax_code: "0312345678"
+                  gs1_company_prefix: "8930001"
+                  sscc_extension_digit: 0
+                  status: ACTIVE
+                  created_at: "2026-09-30T08:00:00.123456Z"
+                  updated_at: "2026-09-30T08:00:00.123456Z"
+                headquarters:
+                  id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d8f
+                  gln: "8930001001015"
+                  name: Saigon Fresh Foods headquarters
+                  address: 12 Nguyen Hue Boulevard, Ben Nghe Ward
+                  city: Ho Chi Minh City
+                  country_code: VN
+                  latitude: 10.773547
+                  longitude: 106.703945
+                  geo_fence_radius_meters: 200
+                  is_headquarters: true
+                  is_active: true
+                  created_at: "2026-09-30T08:00:00.123456Z"
+                  updated_at: "2026-09-30T08:00:00.123456Z"
+                admin:
+                  id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d90
+                  email: admin@sgfresh.example
+                  full_name: Nguyen Van An
+                  phone: "+84 28 3822 1234"
+                  role: ADMIN
+                  is_active: true
+                  last_login_at: null
+                  created_at: "2026-09-30T08:00:00.123456Z"
+                  updated_at: "2026-09-30T08:00:00.123456Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   securitySchemes:
     bearerAuth:
@@ -90,6 +194,235 @@ components:
           example: CHECK_DIGIT
         message:
           type: string
+    Tenant:
+      type: object
+      description: A company registered on VeriTrace.
+      required: [id, code, legal_name, tax_code, gs1_company_prefix, sscc_extension_digit, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          description: Short unique code, used by other tenants to select a carrier or inspector.
+          pattern: "^[A-Z0-9_]{3,32}$"
+        legal_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        tax_code:
+          type: string
+          pattern: "^[0-9]{10}(-[0-9]{3})?$"
+        gs1_company_prefix:
+          type: string
+          description: GS1 company prefix (GCP). Every GLN and GTIN of the tenant starts with it.
+          pattern: "^[0-9]{6,10}$"
+        sscc_extension_digit:
+          type: integer
+          description: First digit of the SSCCs the tenant issues.
+          minimum: 0
+          maximum: 9
+        status:
+          type: string
+          description: Users of a `SUSPENDED` tenant cannot sign in.
+          enum: [ACTIVE, SUSPENDED]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Location:
+      type: object
+      description: A warehouse, hub, or headquarters of the caller's tenant.
+      required: [id, gln, name, address, city, country_code, latitude, longitude, geo_fence_radius_meters, is_headquarters, is_active, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        gln:
+          type: string
+          pattern: "^[0-9]{13}$"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        address:
+          type: string
+          minLength: 1
+          maxLength: 500
+        city:
+          type: string
+          minLength: 1
+          maxLength: 100
+        country_code:
+          type: string
+          description: ISO 3166-1 alpha-2 code.
+          pattern: "^[A-Z]{2}$"
+        latitude:
+          type: number
+          description: WGS-84 degrees, 6 decimals.
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          description: WGS-84 degrees, 6 decimals.
+          minimum: -180
+          maximum: 180
+        geo_fence_radius_meters:
+          type: integer
+          minimum: 50
+          maximum: 5000
+        is_headquarters:
+          type: boolean
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Role:
+      type: string
+      description: The user's role within its tenant. `INSPECTOR` gains permissions in M2.
+      enum: [ADMIN, WAREHOUSE_MANAGER, DRIVER, INSPECTOR]
+    User:
+      type: object
+      description: A user of the caller's tenant.
+      required: [id, email, full_name, phone, role, is_active, last_login_at, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        full_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        phone:
+          type: [string, "null"]
+          minLength: 6
+          maxLength: 32
+        role:
+          $ref: "#/components/schemas/Role"
+        is_active:
+          type: boolean
+          description: Inactive users cannot sign in or refresh their session.
+        last_login_at:
+          type: [string, "null"]
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Password:
+      type: string
+      description: 12 to 128 characters; any characters are allowed and nothing is trimmed.
+      format: password
+      minLength: 12
+      maxLength: 128
+    Phone:
+      type: [string, "null"]
+      description: Digits, spaces, and `+ ( ) . -`, 6 to 32 characters. `null` or an empty string clears it.
+      pattern: "^\\+?[0-9(][0-9 ().-]*[0-9]$"
+      minLength: 6
+      maxLength: 32
+    TenantRegistrationRequest:
+      type: object
+      additionalProperties: false
+      required: [tenant, headquarters, admin]
+      properties:
+        tenant:
+          type: object
+          additionalProperties: false
+          required: [code, legal_name, tax_code, gs1_company_prefix]
+          properties:
+            code:
+              type: string
+              pattern: "^[A-Z0-9_]{3,32}$"
+            legal_name:
+              type: string
+              minLength: 1
+              maxLength: 255
+            tax_code:
+              type: string
+              pattern: "^[0-9]{10}(-[0-9]{3})?$"
+            gs1_company_prefix:
+              type: string
+              pattern: "^[0-9]{6,10}$"
+        headquarters:
+          type: object
+          additionalProperties: false
+          required: [gln, name, address, city, latitude, longitude]
+          properties:
+            gln:
+              type: string
+              description: Must start with `tenant.gs1_company_prefix` and end with a valid check digit.
+              pattern: "^[0-9]{13}$"
+            name:
+              type: string
+              minLength: 1
+              maxLength: 255
+            address:
+              type: string
+              minLength: 1
+              maxLength: 500
+            city:
+              type: string
+              minLength: 1
+              maxLength: 100
+            country_code:
+              type: string
+              pattern: "^[A-Z]{2}$"
+              default: VN
+            latitude:
+              type: number
+              description: Rounded to 6 decimals.
+              minimum: -90
+              maximum: 90
+            longitude:
+              type: number
+              description: Rounded to 6 decimals.
+              minimum: -180
+              maximum: 180
+            geo_fence_radius_meters:
+              type: integer
+              minimum: 50
+              maximum: 5000
+              default: 200
+        admin:
+          type: object
+          additionalProperties: false
+          required: [email, password, full_name]
+          properties:
+            email:
+              type: string
+              format: email
+              maxLength: 254
+            password:
+              $ref: "#/components/schemas/Password"
+            full_name:
+              type: string
+              minLength: 1
+              maxLength: 255
+            phone:
+              $ref: "#/components/schemas/Phone"
+    TenantRegistration:
+      type: object
+      required: [tenant, headquarters, admin]
+      properties:
+        tenant:
+          $ref: "#/components/schemas/Tenant"
+        headquarters:
+          $ref: "#/components/schemas/Location"
+        admin:
+          $ref: "#/components/schemas/User"
     Position:
       type: object
       description: Device-reported WGS-84 position.
@@ -154,6 +487,24 @@ components:
             $ref: "#/components/schemas/Problem"
     UnprocessableContent:
       description: The request is well-formed but violates a domain rule.
+      headers:
+        X-Trace-Id:
+          $ref: "#/components/headers/TraceId"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    PayloadTooLarge:
+      description: The request body exceeds 1 MiB.
+      headers:
+        X-Trace-Id:
+          $ref: "#/components/headers/TraceId"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    UnsupportedMediaType:
+      description: The request body is not `application/json`.
       headers:
         X-Trace-Id:
           $ref: "#/components/headers/TraceId"

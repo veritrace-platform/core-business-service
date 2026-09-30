@@ -53,13 +53,16 @@ The binary exposes these subcommands:
 ## Project layout
 
 ```
-cmd/core-business-service/   entry point and wiring
-internal/httpapi/            REST router and /api/v1 route registration
+cmd/core-business-service/   entry point
+internal/app/                wiring of stores, services, and handlers
+internal/httpapi/            REST router and route mounting
+internal/rest/               problem codes, request validation, and error mapping for the handlers
 internal/tenancy/            tenant transaction helper; tenancytest: isolation test harness
-internal/<domain>/           domain packages (added per story)
+internal/<domain>/           domain packages (tenant, gs1, password, ...); SQL in <domain>/queries
 internal/platform/           config, logging, trace context, HTTP plumbing, admin, database, migrations
 migrations/                  goose SQL migrations (embedded)
 api/openapi.yaml             REST contract
+sqlc.yaml                    query code generation
 ```
 
 ## Tenant isolation
@@ -81,6 +84,7 @@ PostgreSQL row-level security limits every query to the rows the caller's tenant
 ```bash
 make test               # unit tests
 make test-integration   # unit + integration tests (Docker)
+make generate           # regenerate query code after editing SQL (sqlc, in Docker)
 make lint               # golangci-lint
 make openapi-lint       # validate api/openapi.yaml
 make help               # all targets

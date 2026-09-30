@@ -18,7 +18,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 
-	"github.com/veritrace-platform/core-business-service/internal/httpapi"
+	"github.com/veritrace-platform/core-business-service/internal/app"
 	"github.com/veritrace-platform/core-business-service/internal/platform/admin"
 	"github.com/veritrace-platform/core-business-service/internal/platform/buildinfo"
 	"github.com/veritrace-platform/core-business-service/internal/platform/config"
@@ -98,9 +98,14 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 
 	readiness := admin.NewReadiness(map[string]admin.Check{"postgres": pool.Ping}, 2*time.Second)
 
+	api, err := app.NewHandler(app.Dependencies{Logger: logger, Registerer: registry, Pool: pool})
+	if err != nil {
+		return err
+	}
+
 	apiServer := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouter(logger, registry, httpapi.Mounts{}),
+		Handler:           api,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
