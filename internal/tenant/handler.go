@@ -63,17 +63,8 @@ type registrationRequest struct {
 		TaxCode          string `json:"tax_code"`
 		GS1CompanyPrefix string `json:"gs1_company_prefix"`
 	} `json:"tenant"`
-	Headquarters struct {
-		GLN                  string   `json:"gln"`
-		Name                 string   `json:"name"`
-		Address              string   `json:"address"`
-		City                 string   `json:"city"`
-		CountryCode          *string  `json:"country_code"`
-		Latitude             *float64 `json:"latitude"`
-		Longitude            *float64 `json:"longitude"`
-		GeoFenceRadiusMeters *int     `json:"geo_fence_radius_meters"`
-	} `json:"headquarters"`
-	Admin struct {
+	Headquarters location.Request `json:"headquarters"`
+	Admin        struct {
 		Email    string  `json:"email"`
 		Password string  `json:"password"`
 		FullName string  `json:"full_name"`
@@ -82,9 +73,8 @@ type registrationRequest struct {
 }
 
 var (
-	codePattern        = regexp.MustCompile(`^[A-Z0-9_]{3,32}$`)
-	taxCodePattern     = regexp.MustCompile(`^[0-9]{10}(-[0-9]{3})?$`)
-	countryCodePattern = regexp.MustCompile(`^[A-Z]{2}$`)
+	codePattern    = regexp.MustCompile(`^[A-Z0-9_]{3,32}$`)
+	taxCodePattern = regexp.MustCompile(`^[0-9]{10}(-[0-9]{3})?$`)
 )
 
 // validate checks the request and returns the registration it describes, or the problem to answer.
@@ -107,31 +97,12 @@ func (req *registrationRequest) validate() (Registration, *httpx.Problem) {
 		gcpValid = v.Key("tenant.gs1_company_prefix", gs1.ValidateCompanyPrefix(t.GS1CompanyPrefix))
 	}
 
-	hq := &req.Headquarters
-	hq.GLN = strings.TrimSpace(hq.GLN)
-	switch {
-	case hq.GLN == "":
-		v.Add("headquarters.gln", httpx.FieldRequired, "is required")
-	case gcpValid:
-		v.Key("headquarters.gln", gs1.ValidateGLN(hq.GLN, t.GS1CompanyPrefix))
-	default:
-		v.Key("headquarters.gln", gs1.Validate(gs1.GLN, hq.GLN))
-	}
-	v.Text("headquarters.name", &hq.Name, 1, 255)
-	v.Text("headquarters.address", &hq.Address, 1, 500)
-	v.Text("headquarters.city", &hq.City, 1, 100)
-	country := location.DefaultCountryCode
-	if hq.CountryCode != nil {
-		country = strings.TrimSpace(*hq.CountryCode)
-		v.Matches("headquarters.country_code", country, countryCodePattern, "must be an ISO 3166-1 alpha-2 code such as VN")
-	}
-	v.Float("headquarters.latitude", hq.Latitude, -90, 90)
-	v.Float("headquarters.longitude", hq.Longitude, -180, 180)
-	radius := location.DefaultGeoFenceRadiusMeters
-	if hq.GeoFenceRadiusMeters != nil {
-		radius = *hq.GeoFenceRadiusMeters
-		v.Int("headquarters.geo_fence_radius_meters", radius, location.MinGeoFenceRadiusMeters, location.MaxGeoFenceRadiusMeters)
-	}
+	hq := req.Headquarters.Validate(&v, "headquarters.", func(gln string) error {
+		if gcpValid {
+			return gs1.ValidateGLN(gln, t.GS1CompanyPrefix)
+		}
+		return gs1.Validate(gs1.GLN, gln)
+	})
 
 	a := &req.Admin
 	v.Email("admin.email", &a.Email)
@@ -147,17 +118,8 @@ func (req *registrationRequest) validate() (Registration, *httpx.Problem) {
 		LegalName:        t.LegalName,
 		TaxCode:          t.TaxCode,
 		GS1CompanyPrefix: t.GS1CompanyPrefix,
-		Headquarters: Headquarters{
-			GLN:                  hq.GLN,
-			Name:                 hq.Name,
-			Address:              hq.Address,
-			City:                 hq.City,
-			CountryCode:          country,
-			Latitude:             location.RoundCoordinate(*hq.Latitude),
-			Longitude:            location.RoundCoordinate(*hq.Longitude),
-			GeoFenceRadiusMeters: radius,
-		},
-		Admin: Admin{Email: a.Email, Password: a.Password, FullName: a.FullName, Phone: a.Phone},
+		Headquarters:     hq,
+		Admin:            Admin{Email: a.Email, Password: a.Password, FullName: a.FullName, Phone: a.Phone},
 	}, nil
 }
 

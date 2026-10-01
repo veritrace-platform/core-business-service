@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const getTenant = `-- name: GetTenant :one
@@ -93,8 +92,8 @@ type RegisterTenantParams struct {
 	HeadquartersAddress              string
 	HeadquartersCity                 string
 	HeadquartersCountryCode          string
-	HeadquartersLatitude             pgtype.Numeric
-	HeadquartersLongitude            pgtype.Numeric
+	HeadquartersLatitude             float64
+	HeadquartersLongitude            float64
 	HeadquartersGeoFenceRadiusMeters int32
 	AdminEmail                       string
 	AdminPasswordHash                string

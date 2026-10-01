@@ -6,9 +6,13 @@ import (
 	"net/http"
 	"net/mail"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
+
+	"github.com/veritrace-platform/core-business-service/internal/calendar"
 	"github.com/veritrace-platform/core-business-service/internal/gs1"
 	"github.com/veritrace-platform/core-business-service/internal/password"
 	"github.com/veritrace-platform/core-business-service/internal/platform/httpx"
@@ -127,6 +131,29 @@ func (v *Validator) Float(field string, value *float64, minValue, maxValue float
 	return true
 }
 
+// Decimal checks that *value is present, within [minValue, maxValue], and has at most decimals digits after
+// the point, as many as the numeric column keeps.
+func (v *Validator) Decimal(field string, value *float64, minValue, maxValue float64, decimals int) bool {
+	if !v.Float(field, value, minValue, maxValue) {
+		return false
+	}
+	if decimalPlaces(*value) > decimals {
+		v.Add(field, httpx.FieldInvalidFormat, fmt.Sprintf("must have at most %d decimals", decimals))
+		return false
+	}
+	return true
+}
+
+// decimalPlaces counts the digits after the point of value written in its shortest form, which is how JSON
+// writes it: 2.5 has one and 8 has none.
+func decimalPlaces(value float64) int {
+	s := strconv.FormatFloat(value, 'f', -1, 64)
+	if dot := strings.IndexByte(s, '.'); dot >= 0 {
+		return len(s) - dot - 1
+	}
+	return 0
+}
+
 // Int checks that value is within [minValue, maxValue].
 func (v *Validator) Int(field string, value, minValue, maxValue int) bool {
 	if value < minValue || value > maxValue {
@@ -134,6 +161,34 @@ func (v *Validator) Int(field string, value, minValue, maxValue int) bool {
 		return false
 	}
 	return true
+}
+
+// UUID checks that raw is present and a UUID, and returns it.
+func (v *Validator) UUID(field, raw string) (uuid.UUID, bool) {
+	if raw == "" {
+		v.Add(field, httpx.FieldRequired, "is required")
+		return uuid.Nil, false
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		v.Add(field, httpx.FieldInvalidFormat, "must be a UUID")
+		return uuid.Nil, false
+	}
+	return id, true
+}
+
+// Date checks that raw is present and a YYYY-MM-DD date, and returns it.
+func (v *Validator) Date(field, raw string) (calendar.Date, bool) {
+	if raw == "" {
+		v.Add(field, httpx.FieldRequired, "is required")
+		return calendar.Date{}, false
+	}
+	d, err := calendar.Parse(raw)
+	if err != nil {
+		v.Add(field, httpx.FieldInvalidFormat, "must be a date in YYYY-MM-DD form")
+		return calendar.Date{}, false
+	}
+	return d, true
 }
 
 // Key records the result of a GS1 key check; a nil err means the key is valid.

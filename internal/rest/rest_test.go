@@ -115,6 +115,32 @@ func TestValidatorNumbers(t *testing.T) {
 	}
 }
 
+func TestValidatorDecimal(t *testing.T) {
+	tests := []struct {
+		value float64
+		code  string
+	}{
+		{2.5, ""},
+		{-18, ""},
+		{2.15, ""},
+		{-0.05, ""},
+		{8.125, httpx.FieldInvalidFormat},
+		{0.001, httpx.FieldInvalidFormat},
+		{80.01, httpx.FieldOutOfRange},
+	}
+	for _, tt := range tests {
+		var v rest.Validator
+		ok := v.Decimal("t", &tt.value, -50, 80, 2)
+		if got := codes(v.Problem())["t"]; got != tt.code || ok != (tt.code == "") {
+			t.Errorf("Decimal(%v) = %v with code %q, want code %q", tt.value, ok, got, tt.code)
+		}
+	}
+	var v rest.Validator
+	if v.Decimal("t", nil, -50, 80, 2) || codes(v.Problem())["t"] != httpx.FieldRequired {
+		t.Error("a missing value was accepted")
+	}
+}
+
 func TestValidatorProblemKinds(t *testing.T) {
 	var v rest.Validator
 	if v.Problem() != nil || !v.Valid() {
@@ -176,5 +202,30 @@ func TestConflict(t *testing.T) {
 	if rec.Code != http.StatusConflict || p.Code != rest.CodeIdentifierAlreadyRegistered || len(p.Errors) != 1 ||
 		p.Errors[0].Field != "admin.email" || p.Errors[0].Code != rest.FieldAlreadyRegistered {
 		t.Errorf("status = %d, problem = %+v", rec.Code, p)
+	}
+}
+
+func TestValidatorUUIDAndDate(t *testing.T) {
+	var v rest.Validator
+	id, idOK := v.UUID("product_id", "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d8e")
+	day, dayOK := v.Date("expiration_date", "2026-12-31")
+	if !idOK || id.String() != "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d8e" || !dayOK || day.String() != "2026-12-31" || !v.Valid() {
+		t.Errorf("valid values: %s %v, %s %v; errors %v", id, idOK, day, dayOK, codes(v.Problem()))
+	}
+
+	v = rest.Validator{}
+	v.UUID("missing_id", "")
+	v.UUID("bad_id", "42")
+	v.Date("missing_date", "")
+	v.Date("bad_date", "31/12/2026")
+	got := codes(v.Problem())
+	want := map[string]string{
+		"missing_id": httpx.FieldRequired, "bad_id": httpx.FieldInvalidFormat,
+		"missing_date": httpx.FieldRequired, "bad_date": httpx.FieldInvalidFormat,
+	}
+	for field, code := range want {
+		if got[field] != code {
+			t.Errorf("%s: %q, want %q", field, got[field], code)
+		}
 	}
 }

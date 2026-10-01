@@ -20,7 +20,8 @@ type Optional[T any] struct {
 	Value T
 }
 
-// PatchField reads one member of patch. A member of the wrong JSON type is recorded in v.
+// PatchField reads one member of patch. A member of the wrong JSON type is recorded in v and reported as not
+// set, so the caller records no second error for it.
 func PatchField[T any](v *Validator, patch Patch, field string) Optional[T] {
 	raw, ok := patch[field]
 	if !ok {
@@ -33,6 +34,7 @@ func PatchField[T any](v *Validator, patch Patch, field string) Optional[T] {
 	}
 	if err := json.Unmarshal(raw, &o.Value); err != nil {
 		v.Add(field, httpx.FieldInvalidType, "has the wrong JSON type")
+		return Optional[T]{}
 	}
 	return o
 }

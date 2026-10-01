@@ -11,14 +11,18 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/veritrace-platform/core-business-service/internal/app"
 	"github.com/veritrace-platform/core-business-service/internal/auth"
+	"github.com/veritrace-platform/core-business-service/internal/gs1"
 	"github.com/veritrace-platform/core-business-service/internal/platform/httpx"
 	"github.com/veritrace-platform/core-business-service/internal/tenancy/tenancytest"
 )
@@ -443,5 +447,287 @@ func TestTenantProfile(t *testing.T) {
 	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/tenant"}, &problem); resp.status != http.StatusUnauthorized ||
 		problem.Code != "UNAUTHENTICATED" {
 		t.Errorf("anonymous: status = %d, code = %s", resp.status, problem.Code)
+	}
+}
+
+func TestLocationCatalog(t *testing.T) {
+	a := startAPI(t)
+	tenant := a.db.CreateTenant(t)
+	admin, _ := a.login(tenant.Admin.Email, tenancytest.FixturePassword)
+	gln := tenant.GCP + "50" + strconv.Itoa(gs1.CheckDigit(tenant.GCP+"50"))
+
+	type locationBody struct {
+		ID                   string  `json:"id"`
+		GLN                  string  `json:"gln"`
+		Name                 string  `json:"name"`
+		Latitude             float64 `json:"latitude"`
+		GeoFenceRadiusMeters int     `json:"geo_fence_radius_meters"`
+		IsActive             bool    `json:"is_active"`
+	}
+	body := map[string]any{
+		"gln": gln, "name": "Cold Store", "address": "5 Tan Thuan", "city": "Ho Chi Minh City",
+		"latitude": 10.7626224, "longitude": 106.7428,
+	}
+	var created locationBody
+	resp := a.do(request{method: http.MethodPost, path: "/api/v1/locations", token: admin.AccessToken, body: body}, &created)
+	if resp.status != http.StatusCreated || created.GLN != gln || created.Latitude != 10.762622 ||
+		created.GeoFenceRadiusMeters != 200 || resp.header.Get("Location") != "/api/v1/locations/"+created.ID {
+		t.Fatalf("create: status = %d, location = %+v", resp.status, created)
+	}
+	var problem httpx.Problem
+	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/locations", token: admin.AccessToken, body: body}, &problem); resp.status != http.StatusConflict ||
+		problem.Errors[0].Field != "gln" {
+		t.Errorf("same GLN again: status = %d, problem = %+v", resp.status, problem)
+	}
+	body["gln"] = "8934567000017"
+	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/locations", token: admin.AccessToken, body: body}, &problem); resp.status != http.StatusUnprocessableEntity ||
+		problem.Errors[0].Code != "PREFIX_MISMATCH" {
+		t.Errorf("GLN of another prefix: status = %d, problem = %+v", resp.status, problem)
+	}
+
+	// Warehouse managers read the catalog to pick locations, but only admins change it.
+	manager := a.db.CreateUser(t, tenant.ID, "WAREHOUSE_MANAGER")
+	managerSession, _ := a.login(manager.Email, tenancytest.FixturePassword)
+	var page struct {
+		Items []locationBody `json:"items"`
+	}
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/locations?is_active=true", token: managerSession.AccessToken}, &page); resp.status != http.StatusOK ||
+		len(page.Items) != 2 || page.Items[0].ID != created.ID {
+		t.Errorf("manager listing: status = %d, page = %+v; want the new location, then the headquarters", resp.status, page)
+	}
+	if resp := a.do(request{method: http.MethodPatch, path: "/api/v1/locations/" + created.ID, token: managerSession.AccessToken,
+		body: map[string]any{"name": "Mine"}}, &problem); resp.status != http.StatusForbidden {
+		t.Errorf("manager update: status = %d, want 403", resp.status)
+	}
+	driver := a.db.CreateUser(t, tenant.ID, "DRIVER")
+	driverSession, _ := a.login(driver.Email, tenancytest.FixturePassword)
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/locations", token: driverSession.AccessToken}, &problem); resp.status != http.StatusForbidden {
+		t.Errorf("driver listing: status = %d, want 403", resp.status)
+	}
+
+	var updated locationBody
+	if resp := a.do(request{method: http.MethodPatch, path: "/api/v1/locations/" + created.ID, token: admin.AccessToken,
+		body:   map[string]any{"is_active": false, "geo_fence_radius_meters": 400},
+		header: map[string]string{"Content-Type": "application/merge-patch+json"}}, &updated); resp.status != http.StatusOK ||
+		updated.IsActive || updated.GeoFenceRadiusMeters != 400 || updated.Name != "Cold Store" {
+		t.Errorf("deactivate: status = %d, location = %+v", resp.status, updated)
+	}
+	if resp := a.do(request{method: http.MethodPatch, path: "/api/v1/locations/" + created.ID, token: admin.AccessToken,
+		body: map[string]any{"gln": gln}}, &problem); resp.status != http.StatusBadRequest || problem.Errors[0].Code != "UNKNOWN_FIELD" {
+		t.Errorf("changing the GLN: status = %d, problem = %+v", resp.status, problem)
+	}
+
+	// Another tenant's admin sees nothing of this tenant's locations.
+	other := a.db.CreateTenant(t)
+	otherAdmin, _ := a.login(other.Admin.Email, tenancytest.FixturePassword)
+	for _, method := range []string{http.MethodGet, http.MethodPatch} {
+		if resp := a.do(request{method: method, path: "/api/v1/locations/" + created.ID, token: otherAdmin.AccessToken,
+			body: map[string]any{"name": "Hijacked"}}, &problem); resp.status != http.StatusNotFound {
+			t.Errorf("%s by another tenant: status = %d, want 404", method, resp.status)
+		}
+	}
+}
+
+func TestDirectoryLookups(t *testing.T) {
+	a := startAPI(t)
+	owner := a.db.CreateTenant(t)
+	warehouse := a.db.CreateLocation(t, owner)
+
+	// A driver of another tenant confirms a checkpoint facility by its GLN.
+	carrier := a.db.CreateTenant(t)
+	driver := a.db.CreateUser(t, carrier.ID, "DRIVER")
+	session, _ := a.login(driver.Email, tenancytest.FixturePassword)
+
+	var entry struct {
+		GLN    string `json:"gln"`
+		Name   string `json:"name"`
+		Tenant struct {
+			ID   string `json:"id"`
+			Code string `json:"code"`
+		} `json:"tenant"`
+	}
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/directory/locations/" + warehouse.GLN, token: session.AccessToken}, &entry); resp.status != http.StatusOK ||
+		entry.GLN != warehouse.GLN || entry.Name != "Fixture Warehouse" || entry.Tenant.ID != owner.ID.String() || entry.Tenant.Code != owner.Code {
+		t.Errorf("GLN lookup: status = %d, entry = %+v", resp.status, entry)
+	}
+	var tenantEntry struct {
+		ID        string `json:"id"`
+		Code      string `json:"code"`
+		LegalName string `json:"legal_name"`
+	}
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/directory/tenants/" + strings.ToLower(owner.Code), token: session.AccessToken}, &tenantEntry); resp.status != http.StatusOK ||
+		tenantEntry.ID != owner.ID.String() || tenantEntry.LegalName == "" {
+		t.Errorf("tenant lookup: status = %d, entry = %+v", resp.status, tenantEntry)
+	}
+
+	var problem httpx.Problem
+	mistyped := warehouse.GLN[:12] + strconv.Itoa((int(warehouse.GLN[12]-'0')+1)%10)
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/directory/locations/" + mistyped, token: session.AccessToken}, &problem); resp.status != http.StatusUnprocessableEntity ||
+		problem.Errors[0].Code != "CHECK_DIGIT" {
+		t.Errorf("mistyped GLN: status = %d, problem = %+v", resp.status, problem)
+	}
+	if _, err := a.db.Owner.Exec(t.Context(), `UPDATE core.locations SET is_active = false WHERE id = $1`, warehouse.ID); err != nil {
+		t.Fatalf("deactivate: %v", err)
+	}
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/directory/locations/" + warehouse.GLN, token: session.AccessToken}, &problem); resp.status != http.StatusNotFound {
+		t.Errorf("inactive location: status = %d, want 404", resp.status)
+	}
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/directory/tenants/" + owner.Code}, &problem); resp.status != http.StatusUnauthorized {
+		t.Errorf("anonymous lookup: status = %d, want 401", resp.status)
+	}
+}
+
+func TestProductCatalog(t *testing.T) {
+	a := startAPI(t)
+	tenant := a.db.CreateTenant(t)
+	manager := a.db.CreateUser(t, tenant.ID, "WAREHOUSE_MANAGER")
+	session, _ := a.login(manager.Email, tenancytest.FixturePassword)
+	payload := "0" + tenant.GCP + "01"
+	gtin := payload + strconv.Itoa(gs1.CheckDigit(payload))
+
+	type productBody struct {
+		ID             string  `json:"id"`
+		GTIN           string  `json:"gtin"`
+		Name           string  `json:"name"`
+		Description    *string `json:"description"`
+		MinTempCelsius float64 `json:"min_temp_celsius"`
+		MaxTempCelsius float64 `json:"max_temp_celsius"`
+	}
+	body := map[string]any{"gtin": gtin, "name": "Chilled milk", "min_temp_celsius": 2, "max_temp_celsius": 8}
+	var created productBody
+	resp := a.do(request{method: http.MethodPost, path: "/api/v1/products", token: session.AccessToken, body: body}, &created)
+	if resp.status != http.StatusCreated || created.GTIN != gtin || created.MinTempCelsius != 2 || created.Description != nil ||
+		resp.header.Get("Location") != "/api/v1/products/"+created.ID {
+		t.Fatalf("create: status = %d, product = %+v", resp.status, created)
+	}
+	var problem httpx.Problem
+	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/products", token: session.AccessToken, body: body}, &problem); resp.status != http.StatusConflict {
+		t.Errorf("same GTIN again: status = %d, want 409", resp.status)
+	}
+	body["gtin"] = "08934567001014"
+	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/products", token: session.AccessToken, body: body}, &problem); resp.status != http.StatusUnprocessableEntity ||
+		problem.Errors[0].Code != "PREFIX_MISMATCH" {
+		t.Errorf("GTIN of another prefix: status = %d, problem = %+v", resp.status, problem)
+	}
+
+	var page struct {
+		Items []productBody `json:"items"`
+	}
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/products?q=MILK", token: session.AccessToken}, &page); resp.status != http.StatusOK ||
+		len(page.Items) != 1 || page.Items[0].ID != created.ID {
+		t.Errorf("search: status = %d, page = %+v", resp.status, page)
+	}
+
+	// The maximum cannot drop below the stored minimum.
+	if resp := a.do(request{method: http.MethodPatch, path: "/api/v1/products/" + created.ID, token: session.AccessToken,
+		body: map[string]any{"max_temp_celsius": 1.5}}, &problem); resp.status != http.StatusBadRequest ||
+		problem.Errors[0].Field != "max_temp_celsius" {
+		t.Errorf("crossing bounds: status = %d, problem = %+v", resp.status, problem)
+	}
+	var updated productBody
+	if resp := a.do(request{method: http.MethodPatch, path: "/api/v1/products/" + created.ID, token: session.AccessToken,
+		body:   map[string]any{"description": "Pasteurized, 1 L", "max_temp_celsius": 6.5},
+		header: map[string]string{"Content-Type": "application/merge-patch+json"}}, &updated); resp.status != http.StatusOK ||
+		updated.MaxTempCelsius != 6.5 || updated.Description == nil || updated.MinTempCelsius != 2 {
+		t.Errorf("update: status = %d, product = %+v", resp.status, updated)
+	}
+
+	driver := a.db.CreateUser(t, tenant.ID, "DRIVER")
+	driverSession, _ := a.login(driver.Email, tenancytest.FixturePassword)
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/products/" + created.ID, token: driverSession.AccessToken}, &problem); resp.status != http.StatusForbidden {
+		t.Errorf("driver reading a product: status = %d, want 403", resp.status)
+	}
+	other := a.db.CreateTenant(t)
+	otherAdmin, _ := a.login(other.Admin.Email, tenancytest.FixturePassword)
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/products/" + created.ID, token: otherAdmin.AccessToken}, &problem); resp.status != http.StatusNotFound {
+		t.Errorf("another tenant reading the product: status = %d, want 404", resp.status)
+	}
+}
+
+func TestLotsAndInventory(t *testing.T) {
+	a := startAPI(t)
+	owner := a.db.CreateTenant(t)
+	product := a.db.CreateProduct(t, owner)
+	plant := a.db.CreateLocation(t, owner)
+	manager := a.db.CreateUser(t, owner.ID, "WAREHOUSE_MANAGER")
+	session, _ := a.login(manager.Email, tenancytest.FixturePassword)
+
+	type lotBody struct {
+		ID             string `json:"id"`
+		OwnerTenantID  string `json:"owner_tenant_id"`
+		GTIN           string `json:"gtin"`
+		LotNumber      string `json:"lot_number"`
+		ExpirationDate string `json:"expiration_date"`
+		Status         string `json:"status"`
+	}
+	body := map[string]any{
+		"product_id": product.ID, "lot_number": "L2026-09", "production_date": "2026-09-30", "expiration_date": "2026-10-14",
+		"quantity_commissioned": 500, "commissioned_location_id": plant.ID,
+	}
+	var created lotBody
+	resp := a.do(request{method: http.MethodPost, path: "/api/v1/lots", token: session.AccessToken, body: body}, &created)
+	if resp.status != http.StatusCreated || created.GTIN != product.GTIN || created.ExpirationDate != "2026-10-14" ||
+		created.Status != "ACTIVE" || created.OwnerTenantID != owner.ID.String() || resp.header.Get("Location") != "/api/v1/lots/"+created.ID {
+		t.Fatalf("commission: status = %d, lot = %+v", resp.status, created)
+	}
+	var problem httpx.Problem
+	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/lots", token: session.AccessToken, body: body}, &problem); resp.status != http.StatusConflict ||
+		problem.Errors[0].Field != "lot_number" {
+		t.Errorf("same lot number again: status = %d, problem = %+v", resp.status, problem)
+	}
+
+	type inventoryPage struct {
+		Items []struct {
+			Location struct {
+				ID string `json:"id"`
+			} `json:"location"`
+			Lot struct {
+				ID        string `json:"id"`
+				LotNumber string `json:"lot_number"`
+			} `json:"lot"`
+			QuantityOnHand int `json:"quantity_on_hand"`
+		} `json:"items"`
+	}
+	var stock inventoryPage
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/inventory?lot_id=" + created.ID, token: session.AccessToken}, &stock); resp.status != http.StatusOK ||
+		len(stock.Items) != 1 || stock.Items[0].Location.ID != plant.ID.String() || stock.Items[0].QuantityOnHand != 500 ||
+		stock.Items[0].Lot.LotNumber != "L2026-09" {
+		t.Errorf("inventory: status = %d, page = %+v", resp.status, stock)
+	}
+
+	// A tenant that received stock of the lot reads it and its own balance; another tenant sees neither.
+	holder := a.db.CreateTenant(t)
+	dock := a.db.CreateLocation(t, holder)
+	a.db.AddBalance(t, holder, dock, uuid.MustParse(created.ID), 120)
+	holderSession, _ := a.login(holder.Admin.Email, tenancytest.FixturePassword)
+	var held lotBody
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/lots/" + created.ID, token: holderSession.AccessToken}, &held); resp.status != http.StatusOK ||
+		held.LotNumber != "L2026-09" || held.OwnerTenantID != owner.ID.String() {
+		t.Errorf("holder reading the lot: status = %d, lot = %+v", resp.status, held)
+	}
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/inventory", token: holderSession.AccessToken}, &stock); resp.status != http.StatusOK ||
+		len(stock.Items) != 1 || stock.Items[0].Location.ID != dock.ID.String() || stock.Items[0].QuantityOnHand != 120 {
+		t.Errorf("holder inventory: status = %d, page = %+v", resp.status, stock)
+	}
+	stranger := a.db.CreateTenant(t)
+	strangerSession, _ := a.login(stranger.Admin.Email, tenancytest.FixturePassword)
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/lots/" + created.ID, token: strangerSession.AccessToken}, &problem); resp.status != http.StatusNotFound {
+		t.Errorf("stranger reading the lot: status = %d, want 404", resp.status)
+	}
+
+	// Commissioning needs the tenant's own product, and a manager or admin.
+	body["product_id"], body["lot_number"] = a.db.CreateProduct(t, stranger).ID, "L2026-10"
+	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/lots", token: session.AccessToken, body: body}, &problem); resp.status != http.StatusBadRequest ||
+		problem.Errors[0].Field != "product_id" {
+		t.Errorf("another tenant's product: status = %d, problem = %+v", resp.status, problem)
+	}
+	driver := a.db.CreateUser(t, owner.ID, "DRIVER")
+	driverSession, _ := a.login(driver.Email, tenancytest.FixturePassword)
+	body["product_id"] = product.ID
+	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/lots", token: driverSession.AccessToken, body: body}, &problem); resp.status != http.StatusForbidden {
+		t.Errorf("driver commissioning: status = %d, want 403", resp.status)
+	}
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/inventory", token: driverSession.AccessToken}, &problem); resp.status != http.StatusForbidden {
+		t.Errorf("driver reading the inventory: status = %d, want 403", resp.status)
 	}
 }

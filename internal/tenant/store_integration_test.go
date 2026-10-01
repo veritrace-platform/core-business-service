@@ -11,6 +11,7 @@ import (
 
 	"github.com/veritrace-platform/core-business-service/internal/gs1"
 	"github.com/veritrace-platform/core-business-service/internal/identity"
+	"github.com/veritrace-platform/core-business-service/internal/location"
 	"github.com/veritrace-platform/core-business-service/internal/tenancy/tenancytest"
 	"github.com/veritrace-platform/core-business-service/internal/tenant"
 )
@@ -30,7 +31,7 @@ func registration(n int, prefix string) tenant.Registration {
 		LegalName:        fmt.Sprintf("Tenant %d", n),
 		TaxCode:          fmt.Sprintf("%010d", 1000+n),
 		GS1CompanyPrefix: prefix,
-		Headquarters: tenant.Headquarters{
+		Headquarters: location.NewLocation{
 			GLN: glnFor(prefix, n), Name: "Headquarters", Address: "1 Test Street",
 			City: "Da Nang", CountryCode: "VN", Latitude: 16.054407, Longitude: 108.202167, GeoFenceRadiusMeters: 300,
 		},
@@ -167,7 +168,7 @@ func TestTenantDataIsolation(t *testing.T) {
 		},
 		{
 			name:      "locations",
-			rowsOf:    func(x tenancytest.Tenant) tenancytest.Rows { return rows("core.locations", x.HeadquartersID) },
+			rowsOf:    func(x tenancytest.Tenant) tenancytest.Rows { return rows("core.locations", x.Headquarters.ID) },
 			insertFor: `INSERT INTO core.locations (tenant_id, gln, name, address, city, latitude, longitude) VALUES ($1, '9999999999994', 'X', 'X', 'X', 0, 0)`,
 		},
 	}
@@ -188,13 +189,13 @@ func TestTenantDataIsolation(t *testing.T) {
 
 	t.Run("users and locations are never deleted", func(t *testing.T) {
 		db.AssertDenied(t, a.ID, `DELETE FROM core.users WHERE id = $1`, a.Admin.ID)
-		db.AssertDenied(t, a.ID, `DELETE FROM core.locations WHERE id = $1`, a.HeadquartersID)
+		db.AssertDenied(t, a.ID, `DELETE FROM core.locations WHERE id = $1`, a.Headquarters.ID)
 		db.AssertDenied(t, a.ID, `DELETE FROM core.tenants WHERE id = $1`, a.ID)
 	})
 
 	t.Run("a tenant cannot move its rows to another tenant", func(t *testing.T) {
 		db.AssertDenied(t, a.ID, `UPDATE core.users SET tenant_id = $1 WHERE id = $2`, b.ID, a.Admin.ID)
-		db.AssertDenied(t, a.ID, `UPDATE core.locations SET tenant_id = $1 WHERE id = $2`, b.ID, a.HeadquartersID)
+		db.AssertDenied(t, a.ID, `UPDATE core.locations SET tenant_id = $1 WHERE id = $2`, b.ID, a.Headquarters.ID)
 	})
 }
 

@@ -50,36 +50,16 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	page, errs := httpx.ParsePage(r)
-	v := rest.Validator{}
-	for _, e := range errs {
-		v.Add(e.Field, e.Code, e.Message)
-	}
-	f := Filter{Limit: page.Limit + 1}
-	if page.Cursor != "" {
-		after, err := httpx.ParseUUIDCursor(page.Cursor)
-		if err != nil {
-			e := httpx.InvalidCursorError()
-			v.Add(e.Field, e.Code, e.Message)
-		}
-		f.After = after
-	}
-	q := r.URL.Query()
-	if raw := q.Get("role"); raw != "" {
+	var v rest.Validator
+	page, after := v.Page(r)
+	f := Filter{After: after, Limit: page.Limit + 1, IsActive: v.BoolParam(r, "is_active")}
+	if raw := r.URL.Query().Get("role"); raw != "" {
 		role := identity.Role(raw)
 		if role.Valid() {
 			f.Role = &role
 		} else {
 			v.Add("role", httpx.FieldInvalidValue, "must be ADMIN, WAREHOUSE_MANAGER, DRIVER, or INSPECTOR")
 		}
-	}
-	switch raw := q.Get("is_active"); raw {
-	case "":
-	case "true", "false":
-		active := raw == "true"
-		f.IsActive = &active
-	default:
-		v.Add("is_active", httpx.FieldInvalidValue, "must be true or false")
 	}
 	if problem := v.Problem(); problem != nil {
 		httpx.WriteProblem(w, r, *problem)
@@ -152,7 +132,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	id, ok := userID(w, r)
+	id, ok := rest.PathID(w, r, "user_id")
 	if !ok {
 		return
 	}
@@ -169,7 +149,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	id, ok := userID(w, r)
+	id, ok := rest.PathID(w, r, "user_id")
 	if !ok {
 		return
 	}
@@ -224,17 +204,6 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	}
 	h.logger.InfoContext(r.Context(), "user updated", slog.String("updated_user_id", updated.ID.String()))
 	httpx.WriteJSON(w, r, http.StatusOK, updated)
-}
-
-// userID reads the user_id path parameter. An ID that is not a UUID cannot name a visible user, so it answers
-// 404 like any other invisible user.
-func userID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
-	id, err := uuid.Parse(chi.URLParam(r, "user_id"))
-	if err != nil {
-		httpx.NotFound(w, r)
-		return uuid.Nil, false
-	}
-	return id, true
 }
 
 func (h *Handler) fail(w http.ResponseWriter, r *http.Request, err error) {
