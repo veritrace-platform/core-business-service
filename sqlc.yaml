@@ -68,6 +68,13 @@ sql:
         out: internal/location/queries
   - engine: postgresql
     schema: migrations
+    queries: internal/product/queries
+    gen:
+      go:
+        <<: *go
+        out: internal/product/queries
+  - engine: postgresql
+    schema: migrations
     queries: internal/directory/queries
     gen:
       go:

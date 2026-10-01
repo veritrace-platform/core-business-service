@@ -575,3 +575,70 @@ func TestDirectoryLookups(t *testing.T) {
 		t.Errorf("anonymous lookup: status = %d, want 401", resp.status)
 	}
 }
+
+func TestProductCatalog(t *testing.T) {
+	a := startAPI(t)
+	tenant := a.db.CreateTenant(t)
+	manager := a.db.CreateUser(t, tenant.ID, "WAREHOUSE_MANAGER")
+	session, _ := a.login(manager.Email, tenancytest.FixturePassword)
+	payload := "0" + tenant.GCP + "01"
+	gtin := payload + strconv.Itoa(gs1.CheckDigit(payload))
+
+	type productBody struct {
+		ID             string  `json:"id"`
+		GTIN           string  `json:"gtin"`
+		Name           string  `json:"name"`
+		Description    *string `json:"description"`
+		MinTempCelsius float64 `json:"min_temp_celsius"`
+		MaxTempCelsius float64 `json:"max_temp_celsius"`
+	}
+	body := map[string]any{"gtin": gtin, "name": "Chilled milk", "min_temp_celsius": 2, "max_temp_celsius": 8}
+	var created productBody
+	resp := a.do(request{method: http.MethodPost, path: "/api/v1/products", token: session.AccessToken, body: body}, &created)
+	if resp.status != http.StatusCreated || created.GTIN != gtin || created.MinTempCelsius != 2 || created.Description != nil ||
+		resp.header.Get("Location") != "/api/v1/products/"+created.ID {
+		t.Fatalf("create: status = %d, product = %+v", resp.status, created)
+	}
+	var problem httpx.Problem
+	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/products", token: session.AccessToken, body: body}, &problem); resp.status != http.StatusConflict {
+		t.Errorf("same GTIN again: status = %d, want 409", resp.status)
+	}
+	body["gtin"] = "08934567001014"
+	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/products", token: session.AccessToken, body: body}, &problem); resp.status != http.StatusUnprocessableEntity ||
+		problem.Errors[0].Code != "PREFIX_MISMATCH" {
+		t.Errorf("GTIN of another prefix: status = %d, problem = %+v", resp.status, problem)
+	}
+
+	var page struct {
+		Items []productBody `json:"items"`
+	}
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/products?q=MILK", token: session.AccessToken}, &page); resp.status != http.StatusOK ||
+		len(page.Items) != 1 || page.Items[0].ID != created.ID {
+		t.Errorf("search: status = %d, page = %+v", resp.status, page)
+	}
+
+	// The maximum cannot drop below the stored minimum.
+	if resp := a.do(request{method: http.MethodPatch, path: "/api/v1/products/" + created.ID, token: session.AccessToken,
+		body: map[string]any{"max_temp_celsius": 1.5}}, &problem); resp.status != http.StatusBadRequest ||
+		problem.Errors[0].Field != "max_temp_celsius" {
+		t.Errorf("crossing bounds: status = %d, problem = %+v", resp.status, problem)
+	}
+	var updated productBody
+	if resp := a.do(request{method: http.MethodPatch, path: "/api/v1/products/" + created.ID, token: session.AccessToken,
+		body:   map[string]any{"description": "Pasteurized, 1 L", "max_temp_celsius": 6.5},
+		header: map[string]string{"Content-Type": "application/merge-patch+json"}}, &updated); resp.status != http.StatusOK ||
+		updated.MaxTempCelsius != 6.5 || updated.Description == nil || updated.MinTempCelsius != 2 {
+		t.Errorf("update: status = %d, product = %+v", resp.status, updated)
+	}
+
+	driver := a.db.CreateUser(t, tenant.ID, "DRIVER")
+	driverSession, _ := a.login(driver.Email, tenancytest.FixturePassword)
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/products/" + created.ID, token: driverSession.AccessToken}, &problem); resp.status != http.StatusForbidden {
+		t.Errorf("driver reading a product: status = %d, want 403", resp.status)
+	}
+	other := a.db.CreateTenant(t)
+	otherAdmin, _ := a.login(other.Admin.Email, tenancytest.FixturePassword)
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/products/" + created.ID, token: otherAdmin.AccessToken}, &problem); resp.status != http.StatusNotFound {
+		t.Errorf("another tenant reading the product: status = %d, want 404", resp.status)
+	}
+}

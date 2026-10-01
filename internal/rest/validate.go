@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/mail"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -125,6 +126,29 @@ func (v *Validator) Float(field string, value *float64, minValue, maxValue float
 		return false
 	}
 	return true
+}
+
+// Decimal checks that *value is present, within [minValue, maxValue], and has at most decimals digits after
+// the point, as many as the numeric column keeps.
+func (v *Validator) Decimal(field string, value *float64, minValue, maxValue float64, decimals int) bool {
+	if !v.Float(field, value, minValue, maxValue) {
+		return false
+	}
+	if decimalPlaces(*value) > decimals {
+		v.Add(field, httpx.FieldInvalidFormat, fmt.Sprintf("must have at most %d decimals", decimals))
+		return false
+	}
+	return true
+}
+
+// decimalPlaces counts the digits after the point of value written in its shortest form, which is how JSON
+// writes it: 2.5 has one and 8 has none.
+func decimalPlaces(value float64) int {
+	s := strconv.FormatFloat(value, 'f', -1, 64)
+	if dot := strings.IndexByte(s, '.'); dot >= 0 {
+		return len(s) - dot - 1
+	}
+	return 0
 }
 
 // Int checks that value is within [minValue, maxValue].

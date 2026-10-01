@@ -27,7 +27,7 @@ tags:
   - name: Users
     description: The users of the caller's tenant.
   - name: Catalog
-    description: The locations of the caller's tenant.
+    description: The locations and products of the caller's tenant.
   - name: Directory
     description: |
       Public entries of every tenant: active locations by GLN, to pick a shipment destination or confirm a
@@ -687,6 +687,166 @@ paths:
           $ref: "#/components/responses/UnsupportedMediaType"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/products:
+    get:
+      operationId: listProducts
+      tags: [Catalog]
+      summary: List products
+      description: Newest first. `ADMIN` and `WAREHOUSE_MANAGER` read their own tenant's products.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: q
+          in: query
+          description: Matches part of the name, ignoring case, or part of the GTIN.
+          schema:
+            type: string
+            maxLength: 100
+        - name: is_active
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: A page of products.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: createProduct
+      tags: [Catalog]
+      summary: Create a product
+      description: |
+        `ADMIN` and `WAREHOUSE_MANAGER`. The GTIN-14 must contain the tenant's company prefix right after its
+        indicator digit; otherwise the answer is `422 INVALID_GS1_IDENTIFIER` with `PREFIX_MISMATCH`. GTINs are
+        unique across all tenants. Text fields are trimmed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductCreateRequest"
+            example:
+              gtin: "08930001000018"
+              name: Fresh milk 1 L
+              description: Pasteurized whole milk
+              min_temp_celsius: 2
+              max_temp_celsius: 6
+      responses:
+        "201":
+          description: The product is created. `Location` points to it.
+          headers:
+            Location:
+              schema:
+                type: string
+                example: /api/v1/products/0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d94
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{product_id}:
+    parameters:
+      - name: product_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getProduct
+      tags: [Catalog]
+      summary: Read a product
+      description: "`ADMIN` and `WAREHOUSE_MANAGER`."
+      responses:
+        "200":
+          description: The product.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    patch:
+      operationId: updateProduct
+      tags: [Catalog]
+      summary: Update a product
+      description: |
+        `ADMIN` and `WAREHOUSE_MANAGER`. A JSON merge patch of the name, description (`null` or an empty string
+        clears it), temperature bounds, and active flag. The GTIN never changes. The minimum must stay below the
+        maximum, including the stored bound that the patch leaves as it is. New bounds apply to lots
+        commissioned afterwards; existing lots and shipments keep their own. Products are deactivated, never
+        deleted.
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: "#/components/schemas/ProductPatch"
+            example:
+              max_temp_celsius: 4
+      responses:
+        "200":
+          description: The updated product.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/directory/locations/{gln}:
     parameters:
       - name: gln
@@ -1013,6 +1173,97 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Location"
+        next_cursor:
+          type: [string, "null"]
+          description: Pass as `cursor` to read the next page; `null` on the last page.
+    Temperature:
+      type: number
+      description: Degrees Celsius, at most 2 decimals.
+      minimum: -50
+      maximum: 80
+    Product:
+      type: object
+      description: A trade item of the caller's tenant, identified by its GTIN-14.
+      required: [id, gtin, name, description, min_temp_celsius, max_temp_celsius, is_active, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        gtin:
+          type: string
+          description: GTIN-14. GTIN-8, -12, and -13 are left-padded with zeros.
+          pattern: "^[0-9]{14}$"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 1000
+        min_temp_celsius:
+          $ref: "#/components/schemas/Temperature"
+        max_temp_celsius:
+          $ref: "#/components/schemas/Temperature"
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ProductCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [gtin, name, min_temp_celsius, max_temp_celsius]
+      properties:
+        gtin:
+          type: string
+          description: |
+            GTIN-14 with the tenant's company prefix after the indicator digit and a valid check digit. Clients
+            left-pad GTIN-8, -12, and -13 with zeros.
+          pattern: "^[0-9]{14}$"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: [string, "null"]
+          description: "`null` or an empty string means no description."
+          maxLength: 1000
+        min_temp_celsius:
+          $ref: "#/components/schemas/Temperature"
+        max_temp_celsius:
+          description: Must be higher than `min_temp_celsius`.
+          allOf:
+            - $ref: "#/components/schemas/Temperature"
+    ProductPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: [string, "null"]
+          description: "`null` or an empty string clears it."
+          maxLength: 1000
+        min_temp_celsius:
+          $ref: "#/components/schemas/Temperature"
+        max_temp_celsius:
+          $ref: "#/components/schemas/Temperature"
+        is_active:
+          type: boolean
+    ProductPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Product"
         next_cursor:
           type: [string, "null"]
           description: Pass as `cursor` to read the next page; `null` on the last page.

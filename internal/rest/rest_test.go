@@ -115,6 +115,32 @@ func TestValidatorNumbers(t *testing.T) {
 	}
 }
 
+func TestValidatorDecimal(t *testing.T) {
+	tests := []struct {
+		value float64
+		code  string
+	}{
+		{2.5, ""},
+		{-18, ""},
+		{2.15, ""},
+		{-0.05, ""},
+		{8.125, httpx.FieldInvalidFormat},
+		{0.001, httpx.FieldInvalidFormat},
+		{80.01, httpx.FieldOutOfRange},
+	}
+	for _, tt := range tests {
+		var v rest.Validator
+		ok := v.Decimal("t", &tt.value, -50, 80, 2)
+		if got := codes(v.Problem())["t"]; got != tt.code || ok != (tt.code == "") {
+			t.Errorf("Decimal(%v) = %v with code %q, want code %q", tt.value, ok, got, tt.code)
+		}
+	}
+	var v rest.Validator
+	if v.Decimal("t", nil, -50, 80, 2) || codes(v.Problem())["t"] != httpx.FieldRequired {
+		t.Error("a missing value was accepted")
+	}
+}
+
 func TestValidatorProblemKinds(t *testing.T) {
 	var v rest.Validator
 	if v.Problem() != nil || !v.Valid() {

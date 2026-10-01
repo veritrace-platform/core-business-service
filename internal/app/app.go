@@ -17,6 +17,7 @@ import (
 	"github.com/veritrace-platform/core-business-service/internal/httpapi"
 	"github.com/veritrace-platform/core-business-service/internal/location"
 	"github.com/veritrace-platform/core-business-service/internal/password"
+	"github.com/veritrace-platform/core-business-service/internal/product"
 	"github.com/veritrace-platform/core-business-service/internal/ratelimit"
 	"github.com/veritrace-platform/core-business-service/internal/tenancy"
 	"github.com/veritrace-platform/core-business-service/internal/tenant"
@@ -97,12 +98,14 @@ func NewHandler(cfg Config, deps Dependencies) (http.Handler, error) {
 	tenantHandler := tenant.NewHandler(tenants, tenants, throttle(), authenticate, deps.Logger)
 	users := user.NewHandler(user.NewService(user.NewPostgresStore(db), hasher, now), authenticate, deps.Logger)
 	locations := location.NewHandler(location.NewService(location.NewPostgresStore(db)), authenticate, deps.Logger)
+	products := product.NewHandler(product.NewService(product.NewPostgresStore(db)), authenticate, deps.Logger)
 	directoryHandler := directory.NewHandler(directory.NewService(directory.NewPostgresStore(deps.Pool)), authenticate,
 		deps.Logger)
 
 	return httpapi.NewRouter(deps.Logger, deps.Registerer, httpapi.Mounts{
 		API: []httpapi.Routes{
-			tenantHandler.Routes, sessions.Routes, users.Routes, locations.Routes, directoryHandler.Routes,
+			tenantHandler.Routes, sessions.Routes, users.Routes, locations.Routes, products.Routes,
+			directoryHandler.Routes,
 		},
 		WellKnown: []httpapi.Routes{sessions.WellKnownRoutes},
 	}), nil
