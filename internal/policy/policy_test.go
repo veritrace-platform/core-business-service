@@ -40,6 +40,9 @@ var matrix = map[policy.Action]row{
 	policy.ManageUsers:         {parties: []policy.Party{policy.OwnTenant}, roles: admin},
 	policy.ListDrivers:         {parties: []policy.Party{policy.OwnTenant}, roles: managers},
 	policy.ChangeOwnPassword:   {parties: []policy.Party{policy.Self}, roles: allRoles, checks: []policy.Check{policy.CurrentPassword}},
+	policy.ViewCatalog:         {parties: []policy.Party{policy.OwnTenant}, roles: managers},
+	policy.LookUpDirectory:     {parties: []policy.Party{policy.AnyTenant}, roles: allRoles},
+	policy.ViewLots:            {parties: []policy.Party{policy.LotOwner, policy.LotHolder}, roles: managers},
 	policy.ManageLocations:     {parties: []policy.Party{policy.OwnTenant}, roles: admin, checks: []policy.Check{policy.GLNPrefix}},
 	policy.ManageProducts:      {parties: []policy.Party{policy.OwnTenant}, roles: managers, checks: []policy.Check{policy.GTINPrefix}},
 	policy.CommissionLot:       {parties: []policy.Party{policy.OwnTenant}, roles: managers, checks: []policy.Check{policy.ProductOwned, policy.LocationOwned}},
@@ -70,7 +73,7 @@ var matrix = map[policy.Action]row{
 
 var (
 	allParties = []policy.Party{
-		policy.OwnTenant, policy.Self, policy.Owner, policy.Carrier, policy.Consignee, policy.Inspector,
+		policy.AnyTenant, policy.OwnTenant, policy.Self, policy.Owner, policy.Carrier, policy.Consignee, policy.Inspector,
 		policy.LotOwner, policy.LotHolder,
 	}
 	allShipmentStates = []policy.ShipmentStatus{

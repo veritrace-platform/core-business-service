@@ -19,8 +19,11 @@ const (
 	ManageUsers         Action = "users.manage"
 	ListDrivers         Action = "users.list_drivers"
 	ChangeOwnPassword   Action = "account.change_password"
+	ViewCatalog         Action = "catalog.view"
 	ManageLocations     Action = "locations.manage"
 	ManageProducts      Action = "products.manage"
+	LookUpDirectory     Action = "directory.look_up"
+	ViewLots            Action = "lots.view"
 	CommissionLot       Action = "lots.commission"
 	ViewInventory       Action = "inventory.view"
 	CreateShipment      Action = "shipments.create"
@@ -42,11 +45,13 @@ const (
 )
 
 // Party is the caller's relationship to a resource. Master data belongs to the caller's own tenant, an account
-// to the caller itself, and a shipment or lot to its participants, owner, and holders.
+// to the caller itself, and a shipment or lot to its participants, owner, and holders. Directory entries are
+// published to every tenant.
 type Party string
 
 // Parties.
 const (
+	AnyTenant Party = "ANY_TENANT"
 	OwnTenant Party = "OWN_TENANT"
 	Self      Party = "SELF"
 	Owner     Party = "OWNER"
@@ -190,8 +195,11 @@ var rules = map[Action]rule{
 	ManageUsers:         {parties: []Party{OwnTenant}, roles: admin},
 	ListDrivers:         {parties: []Party{OwnTenant}, roles: managers},
 	ChangeOwnPassword:   {parties: []Party{Self}, roles: anyRole, checks: []Check{CurrentPassword}},
+	ViewCatalog:         {parties: []Party{OwnTenant}, roles: managers},
 	ManageLocations:     {parties: []Party{OwnTenant}, roles: admin, checks: []Check{GLNPrefix}},
 	ManageProducts:      {parties: []Party{OwnTenant}, roles: managers, checks: []Check{GTINPrefix}},
+	LookUpDirectory:     {parties: []Party{AnyTenant}, roles: anyRole},
+	ViewLots:            {parties: []Party{LotOwner, LotHolder}, roles: managers},
 	CommissionLot: {
 		parties: []Party{OwnTenant}, roles: managers, checks: []Check{ProductOwned, LocationOwned},
 	},
