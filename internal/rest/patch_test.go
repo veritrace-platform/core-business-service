@@ -39,8 +39,8 @@ func TestPatchFields(t *testing.T) {
 	if role.Set {
 		t.Errorf("role = %+v, want absent", role)
 	}
-	if !active.Set {
-		t.Errorf("is_active = %+v, want present", active)
+	if active.Set {
+		t.Errorf("is_active = %+v, want skipped after its type error", active)
 	}
 	got := codes(v.Problem())
 	want := map[string]string{"is_active": httpx.FieldInvalidType, "email": httpx.FieldUnknown, "zone": httpx.FieldUnknown}
