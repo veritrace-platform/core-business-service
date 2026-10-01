@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/veritrace-platform/core-business-service/internal/identity"
 	"github.com/veritrace-platform/core-business-service/internal/location"
@@ -97,8 +96,8 @@ func (s *Store) RegisterTenant(ctx context.Context, r Registration, passwordHash
 		HeadquartersAddress:              hq.Address,
 		HeadquartersCity:                 hq.City,
 		HeadquartersCountryCode:          hq.CountryCode,
-		HeadquartersLatitude:             coordinate(hq.Latitude),
-		HeadquartersLongitude:            coordinate(hq.Longitude),
+		HeadquartersLatitude:             hq.Latitude,
+		HeadquartersLongitude:            hq.Longitude,
 		HeadquartersGeoFenceRadiusMeters: int32(hq.GeoFenceRadiusMeters), //nolint:gosec // validated to 50–5000
 		AdminEmail:                       r.Admin.Email,
 		AdminPasswordHash:                passwordHash,
@@ -158,12 +157,4 @@ func (s *Store) RegisterTenant(ctx context.Context, r Registration, passwordHash
 			UpdatedAt: created,
 		},
 	}, nil
-}
-
-// coordinate converts degrees, already rounded to six decimals, to numeric(9, 6).
-func coordinate(degrees float64) pgtype.Numeric {
-	var n pgtype.Numeric
-	// A fixed-point decimal string is always a valid numeric.
-	_ = n.Scan(location.FormatCoordinate(degrees))
-	return n
 }

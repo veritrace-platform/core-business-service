@@ -11,6 +11,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +21,7 @@ import (
 
 	"github.com/veritrace-platform/core-business-service/internal/app"
 	"github.com/veritrace-platform/core-business-service/internal/auth"
+	"github.com/veritrace-platform/core-business-service/internal/gs1"
 	"github.com/veritrace-platform/core-business-service/internal/platform/httpx"
 	"github.com/veritrace-platform/core-business-service/internal/tenancy/tenancytest"
 )
@@ -443,5 +446,132 @@ func TestTenantProfile(t *testing.T) {
 	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/tenant"}, &problem); resp.status != http.StatusUnauthorized ||
 		problem.Code != "UNAUTHENTICATED" {
 		t.Errorf("anonymous: status = %d, code = %s", resp.status, problem.Code)
+	}
+}
+
+func TestLocationCatalog(t *testing.T) {
+	a := startAPI(t)
+	tenant := a.db.CreateTenant(t)
+	admin, _ := a.login(tenant.Admin.Email, tenancytest.FixturePassword)
+	gln := tenant.GCP + "50" + strconv.Itoa(gs1.CheckDigit(tenant.GCP+"50"))
+
+	type locationBody struct {
+		ID                   string  `json:"id"`
+		GLN                  string  `json:"gln"`
+		Name                 string  `json:"name"`
+		Latitude             float64 `json:"latitude"`
+		GeoFenceRadiusMeters int     `json:"geo_fence_radius_meters"`
+		IsActive             bool    `json:"is_active"`
+	}
+	body := map[string]any{
+		"gln": gln, "name": "Cold Store", "address": "5 Tan Thuan", "city": "Ho Chi Minh City",
+		"latitude": 10.7626224, "longitude": 106.7428,
+	}
+	var created locationBody
+	resp := a.do(request{method: http.MethodPost, path: "/api/v1/locations", token: admin.AccessToken, body: body}, &created)
+	if resp.status != http.StatusCreated || created.GLN != gln || created.Latitude != 10.762622 ||
+		created.GeoFenceRadiusMeters != 200 || resp.header.Get("Location") != "/api/v1/locations/"+created.ID {
+		t.Fatalf("create: status = %d, location = %+v", resp.status, created)
+	}
+	var problem httpx.Problem
+	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/locations", token: admin.AccessToken, body: body}, &problem); resp.status != http.StatusConflict ||
+		problem.Errors[0].Field != "gln" {
+		t.Errorf("same GLN again: status = %d, problem = %+v", resp.status, problem)
+	}
+	body["gln"] = "8934567000017"
+	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/locations", token: admin.AccessToken, body: body}, &problem); resp.status != http.StatusUnprocessableEntity ||
+		problem.Errors[0].Code != "PREFIX_MISMATCH" {
+		t.Errorf("GLN of another prefix: status = %d, problem = %+v", resp.status, problem)
+	}
+
+	// Warehouse managers read the catalog to pick locations, but only admins change it.
+	manager := a.db.CreateUser(t, tenant.ID, "WAREHOUSE_MANAGER")
+	managerSession, _ := a.login(manager.Email, tenancytest.FixturePassword)
+	var page struct {
+		Items []locationBody `json:"items"`
+	}
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/locations?is_active=true", token: managerSession.AccessToken}, &page); resp.status != http.StatusOK ||
+		len(page.Items) != 2 || page.Items[0].ID != created.ID {
+		t.Errorf("manager listing: status = %d, page = %+v; want the new location, then the headquarters", resp.status, page)
+	}
+	if resp := a.do(request{method: http.MethodPatch, path: "/api/v1/locations/" + created.ID, token: managerSession.AccessToken,
+		body: map[string]any{"name": "Mine"}}, &problem); resp.status != http.StatusForbidden {
+		t.Errorf("manager update: status = %d, want 403", resp.status)
+	}
+	driver := a.db.CreateUser(t, tenant.ID, "DRIVER")
+	driverSession, _ := a.login(driver.Email, tenancytest.FixturePassword)
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/locations", token: driverSession.AccessToken}, &problem); resp.status != http.StatusForbidden {
+		t.Errorf("driver listing: status = %d, want 403", resp.status)
+	}
+
+	var updated locationBody
+	if resp := a.do(request{method: http.MethodPatch, path: "/api/v1/locations/" + created.ID, token: admin.AccessToken,
+		body:   map[string]any{"is_active": false, "geo_fence_radius_meters": 400},
+		header: map[string]string{"Content-Type": "application/merge-patch+json"}}, &updated); resp.status != http.StatusOK ||
+		updated.IsActive || updated.GeoFenceRadiusMeters != 400 || updated.Name != "Cold Store" {
+		t.Errorf("deactivate: status = %d, location = %+v", resp.status, updated)
+	}
+	if resp := a.do(request{method: http.MethodPatch, path: "/api/v1/locations/" + created.ID, token: admin.AccessToken,
+		body: map[string]any{"gln": gln}}, &problem); resp.status != http.StatusBadRequest || problem.Errors[0].Code != "UNKNOWN_FIELD" {
+		t.Errorf("changing the GLN: status = %d, problem = %+v", resp.status, problem)
+	}
+
+	// Another tenant's admin sees nothing of this tenant's locations.
+	other := a.db.CreateTenant(t)
+	otherAdmin, _ := a.login(other.Admin.Email, tenancytest.FixturePassword)
+	for _, method := range []string{http.MethodGet, http.MethodPatch} {
+		if resp := a.do(request{method: method, path: "/api/v1/locations/" + created.ID, token: otherAdmin.AccessToken,
+			body: map[string]any{"name": "Hijacked"}}, &problem); resp.status != http.StatusNotFound {
+			t.Errorf("%s by another tenant: status = %d, want 404", method, resp.status)
+		}
+	}
+}
+
+func TestDirectoryLookups(t *testing.T) {
+	a := startAPI(t)
+	owner := a.db.CreateTenant(t)
+	warehouse := a.db.CreateLocation(t, owner)
+
+	// A driver of another tenant confirms a checkpoint facility by its GLN.
+	carrier := a.db.CreateTenant(t)
+	driver := a.db.CreateUser(t, carrier.ID, "DRIVER")
+	session, _ := a.login(driver.Email, tenancytest.FixturePassword)
+
+	var entry struct {
+		GLN    string `json:"gln"`
+		Name   string `json:"name"`
+		Tenant struct {
+			ID   string `json:"id"`
+			Code string `json:"code"`
+		} `json:"tenant"`
+	}
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/directory/locations/" + warehouse.GLN, token: session.AccessToken}, &entry); resp.status != http.StatusOK ||
+		entry.GLN != warehouse.GLN || entry.Name != "Fixture Warehouse" || entry.Tenant.ID != owner.ID.String() || entry.Tenant.Code != owner.Code {
+		t.Errorf("GLN lookup: status = %d, entry = %+v", resp.status, entry)
+	}
+	var tenantEntry struct {
+		ID        string `json:"id"`
+		Code      string `json:"code"`
+		LegalName string `json:"legal_name"`
+	}
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/directory/tenants/" + strings.ToLower(owner.Code), token: session.AccessToken}, &tenantEntry); resp.status != http.StatusOK ||
+		tenantEntry.ID != owner.ID.String() || tenantEntry.LegalName == "" {
+		t.Errorf("tenant lookup: status = %d, entry = %+v", resp.status, tenantEntry)
+	}
+
+	var problem httpx.Problem
+	mistyped := warehouse.GLN[:12] + strconv.Itoa((int(warehouse.GLN[12]-'0')+1)%10)
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/directory/locations/" + mistyped, token: session.AccessToken}, &problem); resp.status != http.StatusUnprocessableEntity ||
+		problem.Errors[0].Code != "CHECK_DIGIT" {
+		t.Errorf("mistyped GLN: status = %d, problem = %+v", resp.status, problem)
+	}
+	if _, err := a.db.Owner.Exec(t.Context(), `UPDATE core.locations SET is_active = false WHERE id = $1`, warehouse.ID); err != nil {
+		t.Fatalf("deactivate: %v", err)
+	}
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/directory/locations/" + warehouse.GLN, token: session.AccessToken}, &problem); resp.status != http.StatusNotFound {
+		t.Errorf("inactive location: status = %d, want 404", resp.status)
+	}
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/directory/tenants/" + owner.Code}, &problem); resp.status != http.StatusUnauthorized {
+		t.Errorf("anonymous lookup: status = %d, want 401", resp.status)
 	}
 }

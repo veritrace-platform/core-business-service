@@ -26,6 +26,12 @@ tags:
     description: The signed-in user's own account.
   - name: Users
     description: The users of the caller's tenant.
+  - name: Catalog
+    description: The locations of the caller's tenant.
+  - name: Directory
+    description: |
+      Public entries of every tenant: active locations by GLN, to pick a shipment destination or confirm a
+      checkpoint facility, and active tenants by code, to pick a carrier.
 paths:
   /api/v1/tenants:
     post:
@@ -526,6 +532,241 @@ paths:
           $ref: "#/components/responses/UnsupportedMediaType"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/locations:
+    get:
+      operationId: listLocations
+      tags: [Catalog]
+      summary: List locations
+      description: Newest first. `ADMIN` and `WAREHOUSE_MANAGER` read their own tenant's locations.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: is_active
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: A page of locations.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocationPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: createLocation
+      tags: [Catalog]
+      summary: Create a location
+      description: |
+        `ADMIN` only. The GLN must start with the tenant's company prefix; otherwise the answer is
+        `422 INVALID_GS1_IDENTIFIER` with `PREFIX_MISMATCH`. GLNs are unique across all tenants. Text fields are
+        trimmed, and coordinates are rounded to 6 decimals.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LocationCreateRequest"
+            example:
+              gln: "8930001000025"
+              name: Tan Thuan cold store
+              address: 5 Tan Thuan Export Processing Zone, District 7
+              city: Ho Chi Minh City
+              latitude: 10.762622
+              longitude: 106.742801
+              geo_fence_radius_meters: 300
+      responses:
+        "201":
+          description: The location is created. `Location` points to it.
+          headers:
+            Location:
+              schema:
+                type: string
+                example: /api/v1/locations/0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d92
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Location"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/locations/{location_id}:
+    parameters:
+      - name: location_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getLocation
+      tags: [Catalog]
+      summary: Read a location
+      description: "`ADMIN` and `WAREHOUSE_MANAGER`."
+      responses:
+        "200":
+          description: The location.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Location"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    patch:
+      operationId: updateLocation
+      tags: [Catalog]
+      summary: Update a location
+      description: |
+        `ADMIN` only. A JSON merge patch of the name, address, city, country code, coordinates, geo-fence radius,
+        and active flag. The GLN and the headquarters flag never change. Locations are deactivated, never
+        deleted: an inactive location stays on the lots and shipments that refer to it, but leaves the
+        directory.
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: "#/components/schemas/LocationPatch"
+            example:
+              geo_fence_radius_meters: 400
+      responses:
+        "200":
+          description: The updated location.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Location"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/directory/locations/{gln}:
+    parameters:
+      - name: gln
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: "^[0-9]{13}$"
+    get:
+      operationId: lookUpLocation
+      tags: [Directory]
+      summary: Look up a GLN
+      description: |
+        Any signed-in user. Resolves the GLN of an active location of an active tenant, own or other, to its
+        public fields and its tenant. A GLN with a wrong length, a non-digit, or a wrong check digit answers
+        `422 INVALID_GS1_IDENTIFIER`; a valid GLN without an active location answers 404.
+      responses:
+        "200":
+          description: The location's directory entry.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DirectoryLocation"
+              example:
+                gln: "8930001000025"
+                name: Tan Thuan cold store
+                address: 5 Tan Thuan Export Processing Zone, District 7
+                city: Ho Chi Minh City
+                country_code: VN
+                latitude: 10.762622
+                longitude: 106.742801
+                geo_fence_radius_meters: 300
+                tenant:
+                  id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d8e
+                  code: SGFRESH
+                  legal_name: Saigon Fresh Foods Joint Stock Company
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/directory/tenants/{code}:
+    parameters:
+      - name: code
+        in: path
+        required: true
+        description: Tenant code; matched ignoring case.
+        schema:
+          type: string
+    get:
+      operationId: lookUpTenant
+      tags: [Directory]
+      summary: Look up a tenant code
+      description: Any signed-in user. Resolves the code of an active tenant, for example to pick a carrier.
+      responses:
+        "200":
+          description: The tenant's directory entry.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DirectoryTenant"
+              example:
+                id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d93
+                code: MEKONG_LOGISTICS
+                legal_name: Mekong Logistics Company Limited
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   securitySchemes:
     bearerAuth:
@@ -639,7 +880,7 @@ components:
           format: date-time
     Location:
       type: object
-      description: A warehouse, hub, or headquarters of the caller's tenant.
+      description: A warehouse, hub, or headquarters of the caller's tenant, identified by its GLN.
       required: [id, gln, name, address, city, country_code, latitude, longitude, geo_fence_radius_meters, is_headquarters, is_active, created_at, updated_at]
       properties:
         id:
@@ -688,6 +929,134 @@ components:
         updated_at:
           type: string
           format: date-time
+    LocationCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [gln, name, address, city, latitude, longitude]
+      properties:
+        gln:
+          type: string
+          description: Must start with the tenant's GS1 company prefix and end with a valid check digit.
+          pattern: "^[0-9]{13}$"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        address:
+          type: string
+          minLength: 1
+          maxLength: 500
+        city:
+          type: string
+          minLength: 1
+          maxLength: 100
+        country_code:
+          type: string
+          pattern: "^[A-Z]{2}$"
+          default: VN
+        latitude:
+          type: number
+          description: Rounded to 6 decimals.
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          description: Rounded to 6 decimals.
+          minimum: -180
+          maximum: 180
+        geo_fence_radius_meters:
+          type: integer
+          minimum: 50
+          maximum: 5000
+          default: 200
+    LocationPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        address:
+          type: string
+          minLength: 1
+          maxLength: 500
+        city:
+          type: string
+          minLength: 1
+          maxLength: 100
+        country_code:
+          type: string
+          pattern: "^[A-Z]{2}$"
+        latitude:
+          type: number
+          description: Rounded to 6 decimals.
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          description: Rounded to 6 decimals.
+          minimum: -180
+          maximum: 180
+        geo_fence_radius_meters:
+          type: integer
+          minimum: 50
+          maximum: 5000
+        is_active:
+          type: boolean
+          description: Inactive locations cannot receive new lots or shipments and are not in the directory.
+    LocationPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Location"
+        next_cursor:
+          type: [string, "null"]
+          description: Pass as `cursor` to read the next page; `null` on the last page.
+    DirectoryTenant:
+      type: object
+      description: The public entry of an active tenant.
+      required: [id, code, legal_name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          pattern: "^[A-Z0-9_]{3,32}$"
+        legal_name:
+          type: string
+    DirectoryLocation:
+      type: object
+      description: The public entry of an active location of an active tenant.
+      required: [gln, name, address, city, country_code, latitude, longitude, geo_fence_radius_meters, tenant]
+      properties:
+        gln:
+          type: string
+          pattern: "^[0-9]{13}$"
+        name:
+          type: string
+        address:
+          type: string
+        city:
+          type: string
+        country_code:
+          type: string
+          pattern: "^[A-Z]{2}$"
+        latitude:
+          type: number
+          description: WGS-84 degrees, 6 decimals.
+        longitude:
+          type: number
+          description: WGS-84 degrees, 6 decimals.
+        geo_fence_radius_meters:
+          type: integer
+          description: Positions within this distance of the coordinates count as at the location.
+        tenant:
+          $ref: "#/components/schemas/DirectoryTenant"
     Role:
       type: string
       description: The user's role within its tenant. `INSPECTOR` gains permissions in M2.
@@ -924,45 +1293,7 @@ components:
               type: string
               pattern: "^[0-9]{6,10}$"
         headquarters:
-          type: object
-          additionalProperties: false
-          required: [gln, name, address, city, latitude, longitude]
-          properties:
-            gln:
-              type: string
-              description: Must start with `tenant.gs1_company_prefix` and end with a valid check digit.
-              pattern: "^[0-9]{13}$"
-            name:
-              type: string
-              minLength: 1
-              maxLength: 255
-            address:
-              type: string
-              minLength: 1
-              maxLength: 500
-            city:
-              type: string
-              minLength: 1
-              maxLength: 100
-            country_code:
-              type: string
-              pattern: "^[A-Z]{2}$"
-              default: VN
-            latitude:
-              type: number
-              description: Rounded to 6 decimals.
-              minimum: -90
-              maximum: 90
-            longitude:
-              type: number
-              description: Rounded to 6 decimals.
-              minimum: -180
-              maximum: 180
-            geo_fence_radius_meters:
-              type: integer
-              minimum: 50
-              maximum: 5000
-              default: 200
+          $ref: "#/components/schemas/LocationCreateRequest"
         admin:
           type: object
           additionalProperties: false

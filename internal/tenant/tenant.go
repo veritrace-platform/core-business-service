@@ -41,20 +41,9 @@ type Registration struct {
 	LegalName        string
 	TaxCode          string
 	GS1CompanyPrefix string
-	Headquarters     Headquarters
-	Admin            Admin
-}
-
-// Headquarters is the tenant's first location.
-type Headquarters struct {
-	GLN                  string
-	Name                 string
-	Address              string
-	City                 string
-	CountryCode          string
-	Latitude             float64
-	Longitude            float64
-	GeoFenceRadiusMeters int
+	// Headquarters is the tenant's first location.
+	Headquarters location.NewLocation
+	Admin        Admin
 }
 
 // Admin is the tenant's first user, who gets the ADMIN role.

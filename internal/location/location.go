@@ -1,7 +1,8 @@
-// Package location models a tenant's physical locations, identified by GLN (data-model.md §3.2).
+// Package location manages a tenant's physical locations, identified by GLN (data-model.md §3.2).
 package location
 
 import (
+	"errors"
 	"strconv"
 	"time"
 
@@ -23,17 +24,12 @@ const CoordinateDecimals = 6
 
 // RoundCoordinate rounds degrees to CoordinateDecimals decimals, the value the database keeps.
 func RoundCoordinate(degrees float64) float64 {
-	rounded, err := strconv.ParseFloat(FormatCoordinate(degrees), 64)
+	rounded, err := strconv.ParseFloat(strconv.FormatFloat(degrees, 'f', CoordinateDecimals, 64), 64)
 	if err != nil {
-		// FormatCoordinate always produces a parseable number.
+		// A fixed-point decimal always parses.
 		return degrees
 	}
 	return rounded
-}
-
-// FormatCoordinate renders degrees as a fixed-point decimal with CoordinateDecimals decimals.
-func FormatCoordinate(degrees float64) string {
-	return strconv.FormatFloat(degrees, 'f', CoordinateDecimals, 64)
 }
 
 // Location is a warehouse, hub, or headquarters of one tenant.
@@ -52,3 +48,44 @@ type Location struct {
 	CreatedAt            time.Time `json:"created_at"`
 	UpdatedAt            time.Time `json:"updated_at"`
 }
+
+// NewLocation is a validated location to add to a tenant.
+type NewLocation struct {
+	GLN                  string
+	Name                 string
+	Address              string
+	City                 string
+	CountryCode          string
+	Latitude             float64
+	Longitude            float64
+	GeoFenceRadiusMeters int
+}
+
+// Filter selects a page of locations, newest first.
+type Filter struct {
+	IsActive *bool
+	// After is the last location of the previous page; uuid.Nil starts at the newest location.
+	After uuid.UUID
+	Limit int
+}
+
+// Patch lists the changes to a location; nil fields stay as they are. The GLN identifies the location and
+// never changes.
+type Patch struct {
+	Name                 *string
+	Address              *string
+	City                 *string
+	CountryCode          *string
+	Latitude             *float64
+	Longitude            *float64
+	GeoFenceRadiusMeters *int
+	IsActive             *bool
+}
+
+// Location errors.
+var (
+	// ErrNotFound reports a location that does not exist or belongs to another tenant.
+	ErrNotFound = errors.New("location not found")
+	// ErrGLNTaken reports a GLN that another location, of any tenant, already has.
+	ErrGLNTaken = errors.New("GLN already registered")
+)

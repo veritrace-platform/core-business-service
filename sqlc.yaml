@@ -29,6 +29,22 @@ sql:
               import: time
               type: Time
               pointer: true
+          # Numeric values (coordinates, temperatures) have at most 9 digits, which a float64 round-trips, and
+          # pgx converts them through their decimal text. Function results name the type without its schema.
+          - db_type: numeric
+            go_type: float64
+          - db_type: numeric
+            nullable: true
+            go_type:
+              type: float64
+              pointer: true
+          - db_type: pg_catalog.numeric
+            go_type: float64
+          - db_type: pg_catalog.numeric
+            nullable: true
+            go_type:
+              type: float64
+              pointer: true
   - engine: postgresql
     schema: migrations
     queries: internal/auth/queries
@@ -43,3 +59,17 @@ sql:
       go:
         <<: *go
         out: internal/user/queries
+  - engine: postgresql
+    schema: migrations
+    queries: internal/location/queries
+    gen:
+      go:
+        <<: *go
+        out: internal/location/queries
+  - engine: postgresql
+    schema: migrations
+    queries: internal/directory/queries
+    gen:
+      go:
+        <<: *go
+        out: internal/directory/queries
