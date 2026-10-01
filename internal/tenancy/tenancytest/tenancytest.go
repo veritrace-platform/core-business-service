@@ -104,7 +104,19 @@ func (d *Database) AssertHidden(t testing.TB, tenantID uuid.UUID, rows Rows) {
 	if n := d.count(t, d.inTx(tenantID), rows); n != 0 {
 		t.Errorf("%s: %s can read %d row(s)", rows, tenantLabel(tenantID), n)
 	}
+	d.assertUnwritable(t, tenantID, rows)
+}
 
+// AssertReadOnly fails the test unless tenantID can read the rows but can neither update nor delete any of them.
+func (d *Database) AssertReadOnly(t testing.TB, tenantID uuid.UUID, rows Rows) {
+	t.Helper()
+	d.AssertVisible(t, tenantID, rows)
+	d.assertUnwritable(t, tenantID, rows)
+}
+
+// assertUnwritable fails the test if tenantID can update or delete any of the rows.
+func (d *Database) assertUnwritable(t testing.TB, tenantID uuid.UUID, rows Rows) {
+	t.Helper()
 	q := rows.query(t)
 	writes := []struct{ verb, sql string }{
 		// SET <column> = <column> changes nothing, so only row visibility and grants decide the outcome.

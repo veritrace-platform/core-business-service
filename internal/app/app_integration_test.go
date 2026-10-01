@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/veritrace-platform/core-business-service/internal/app"
@@ -640,5 +641,93 @@ func TestProductCatalog(t *testing.T) {
 	otherAdmin, _ := a.login(other.Admin.Email, tenancytest.FixturePassword)
 	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/products/" + created.ID, token: otherAdmin.AccessToken}, &problem); resp.status != http.StatusNotFound {
 		t.Errorf("another tenant reading the product: status = %d, want 404", resp.status)
+	}
+}
+
+func TestLotsAndInventory(t *testing.T) {
+	a := startAPI(t)
+	owner := a.db.CreateTenant(t)
+	product := a.db.CreateProduct(t, owner)
+	plant := a.db.CreateLocation(t, owner)
+	manager := a.db.CreateUser(t, owner.ID, "WAREHOUSE_MANAGER")
+	session, _ := a.login(manager.Email, tenancytest.FixturePassword)
+
+	type lotBody struct {
+		ID             string `json:"id"`
+		OwnerTenantID  string `json:"owner_tenant_id"`
+		GTIN           string `json:"gtin"`
+		LotNumber      string `json:"lot_number"`
+		ExpirationDate string `json:"expiration_date"`
+		Status         string `json:"status"`
+	}
+	body := map[string]any{
+		"product_id": product.ID, "lot_number": "L2026-09", "production_date": "2026-09-30", "expiration_date": "2026-10-14",
+		"quantity_commissioned": 500, "commissioned_location_id": plant.ID,
+	}
+	var created lotBody
+	resp := a.do(request{method: http.MethodPost, path: "/api/v1/lots", token: session.AccessToken, body: body}, &created)
+	if resp.status != http.StatusCreated || created.GTIN != product.GTIN || created.ExpirationDate != "2026-10-14" ||
+		created.Status != "ACTIVE" || created.OwnerTenantID != owner.ID.String() || resp.header.Get("Location") != "/api/v1/lots/"+created.ID {
+		t.Fatalf("commission: status = %d, lot = %+v", resp.status, created)
+	}
+	var problem httpx.Problem
+	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/lots", token: session.AccessToken, body: body}, &problem); resp.status != http.StatusConflict ||
+		problem.Errors[0].Field != "lot_number" {
+		t.Errorf("same lot number again: status = %d, problem = %+v", resp.status, problem)
+	}
+
+	type inventoryPage struct {
+		Items []struct {
+			Location struct {
+				ID string `json:"id"`
+			} `json:"location"`
+			Lot struct {
+				ID        string `json:"id"`
+				LotNumber string `json:"lot_number"`
+			} `json:"lot"`
+			QuantityOnHand int `json:"quantity_on_hand"`
+		} `json:"items"`
+	}
+	var stock inventoryPage
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/inventory?lot_id=" + created.ID, token: session.AccessToken}, &stock); resp.status != http.StatusOK ||
+		len(stock.Items) != 1 || stock.Items[0].Location.ID != plant.ID.String() || stock.Items[0].QuantityOnHand != 500 ||
+		stock.Items[0].Lot.LotNumber != "L2026-09" {
+		t.Errorf("inventory: status = %d, page = %+v", resp.status, stock)
+	}
+
+	// A tenant that received stock of the lot reads it and its own balance; another tenant sees neither.
+	holder := a.db.CreateTenant(t)
+	dock := a.db.CreateLocation(t, holder)
+	a.db.AddBalance(t, holder, dock, uuid.MustParse(created.ID), 120)
+	holderSession, _ := a.login(holder.Admin.Email, tenancytest.FixturePassword)
+	var held lotBody
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/lots/" + created.ID, token: holderSession.AccessToken}, &held); resp.status != http.StatusOK ||
+		held.LotNumber != "L2026-09" || held.OwnerTenantID != owner.ID.String() {
+		t.Errorf("holder reading the lot: status = %d, lot = %+v", resp.status, held)
+	}
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/inventory", token: holderSession.AccessToken}, &stock); resp.status != http.StatusOK ||
+		len(stock.Items) != 1 || stock.Items[0].Location.ID != dock.ID.String() || stock.Items[0].QuantityOnHand != 120 {
+		t.Errorf("holder inventory: status = %d, page = %+v", resp.status, stock)
+	}
+	stranger := a.db.CreateTenant(t)
+	strangerSession, _ := a.login(stranger.Admin.Email, tenancytest.FixturePassword)
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/lots/" + created.ID, token: strangerSession.AccessToken}, &problem); resp.status != http.StatusNotFound {
+		t.Errorf("stranger reading the lot: status = %d, want 404", resp.status)
+	}
+
+	// Commissioning needs the tenant's own product, and a manager or admin.
+	body["product_id"], body["lot_number"] = a.db.CreateProduct(t, stranger).ID, "L2026-10"
+	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/lots", token: session.AccessToken, body: body}, &problem); resp.status != http.StatusBadRequest ||
+		problem.Errors[0].Field != "product_id" {
+		t.Errorf("another tenant's product: status = %d, problem = %+v", resp.status, problem)
+	}
+	driver := a.db.CreateUser(t, owner.ID, "DRIVER")
+	driverSession, _ := a.login(driver.Email, tenancytest.FixturePassword)
+	body["product_id"] = product.ID
+	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/lots", token: driverSession.AccessToken, body: body}, &problem); resp.status != http.StatusForbidden {
+		t.Errorf("driver commissioning: status = %d, want 403", resp.status)
+	}
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/inventory", token: driverSession.AccessToken}, &problem); resp.status != http.StatusForbidden {
+		t.Errorf("driver reading the inventory: status = %d, want 403", resp.status)
 	}
 }

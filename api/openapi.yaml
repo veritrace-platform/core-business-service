@@ -28,6 +28,10 @@ tags:
     description: The users of the caller's tenant.
   - name: Catalog
     description: The locations and products of the caller's tenant.
+  - name: Lots
+    description: Lots that the caller's tenant commissioned or holds stock of.
+  - name: Inventory
+    description: Stock balances at the caller's locations.
   - name: Directory
     description: |
       Public entries of every tenant: active locations by GLN, to pick a shipment destination or confirm a
@@ -814,7 +818,7 @@ paths:
         clears it), temperature bounds, and active flag. The GTIN never changes. The minimum must stay below the
         maximum, including the stored bound that the patch leaves as it is. New bounds apply to lots
         commissioned afterwards; existing lots and shipments keep their own. Products are deactivated, never
-        deleted.
+        deleted, and an inactive product takes no new lots.
       requestBody:
         required: true
         content:
@@ -845,6 +849,184 @@ paths:
           $ref: "#/components/responses/PayloadTooLarge"
         "415":
           $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/lots:
+    get:
+      operationId: listLots
+      tags: [Lots]
+      summary: List lots
+      description: |
+        Newest first. `ADMIN` and `WAREHOUSE_MANAGER` see the lots their tenant owns, and the lots of other
+        tenants that it holds or held stock of.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: product_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/LotStatus"
+      responses:
+        "200":
+          description: A page of lots.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LotPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: commissionLot
+      tags: [Lots]
+      summary: Commission a lot
+      description: |
+        `ADMIN` and `WAREHOUSE_MANAGER`. Creates an `ACTIVE` lot of one of the tenant's active products, adds the
+        quantity to the balance of one of its active locations, and records a `COMMISSIONED` inventory movement.
+        A product or location that is inactive or not the tenant's answers `400` with `INVALID_VALUE` on its
+        field. The lot copies the product's GTIN, name, and temperature bounds. A product cannot have two lots
+        with the same number (`409 IDENTIFIER_ALREADY_REGISTERED` on `lot_number`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LotCommissionRequest"
+            example:
+              product_id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d94
+              lot_number: L2026-09-30A
+              production_date: "2026-09-30"
+              expiration_date: "2026-10-14"
+              quantity_commissioned: 500
+              commissioned_location_id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d92
+      responses:
+        "201":
+          description: The lot is commissioned. `Location` points to it.
+          headers:
+            Location:
+              schema:
+                type: string
+                example: /api/v1/lots/0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d95
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lot"
+              example:
+                id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d95
+                owner_tenant_id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d8e
+                product_id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d94
+                gtin: "08930001000018"
+                product_name: Fresh milk 1 L
+                min_temp_celsius: 2
+                max_temp_celsius: 6
+                lot_number: L2026-09-30A
+                production_date: "2026-09-30"
+                expiration_date: "2026-10-14"
+                quantity_commissioned: 500
+                commissioned_location_id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d92
+                status: ACTIVE
+                recalled_at: null
+                created_at: "2026-09-30T09:00:00.123456Z"
+                updated_at: "2026-09-30T09:00:00.123456Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/lots/{lot_id}:
+    parameters:
+      - name: lot_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getLot
+      tags: [Lots]
+      summary: Read a lot
+      description: |
+        `ADMIN` and `WAREHOUSE_MANAGER` of the owner, or of a tenant that holds or held stock of the lot. Any other
+        tenant gets 404.
+      responses:
+        "200":
+          description: The lot.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lot"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/inventory:
+    get:
+      operationId: listInventory
+      tags: [Inventory]
+      summary: List stock balances
+      description: |
+        `ADMIN` and `WAREHOUSE_MANAGER`. The balances above zero at the tenant's locations, including stock of
+        lots owned by other tenants, ordered by location and then lot, newest first.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: location_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: lot_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: A page of balances.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BalancePage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/directory/locations/{gln}:
@@ -1264,6 +1446,173 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Product"
+        next_cursor:
+          type: [string, "null"]
+          description: Pass as `cursor` to read the next page; `null` on the last page.
+    LotStatus:
+      type: string
+      description: A `RECALLED` lot takes no new shipments, and its shipments accept no further commands.
+      enum: [ACTIVE, RECALLED]
+    LotNumber:
+      type: string
+      description: GS1 AI 10, restricted to characters that need no escaping in URLs.
+      pattern: "^[0-9A-Za-z._-]{1,20}$"
+    Lot:
+      type: object
+      description: |
+        A production batch of one product. The GTIN, product name, and temperature bounds are copied from the
+        product at commissioning, so tenants that hold the lot read them without the owner's catalog.
+      required:
+        - id
+        - owner_tenant_id
+        - product_id
+        - gtin
+        - product_name
+        - min_temp_celsius
+        - max_temp_celsius
+        - lot_number
+        - production_date
+        - expiration_date
+        - quantity_commissioned
+        - commissioned_location_id
+        - status
+        - recalled_at
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        owner_tenant_id:
+          type: string
+          format: uuid
+          description: The tenant that commissioned the lot. Compare with the caller's tenant to tell owned lots from held ones.
+        product_id:
+          type: string
+          format: uuid
+          description: A product of the owner.
+        gtin:
+          type: string
+          pattern: "^[0-9]{14}$"
+        product_name:
+          type: string
+        min_temp_celsius:
+          $ref: "#/components/schemas/Temperature"
+        max_temp_celsius:
+          $ref: "#/components/schemas/Temperature"
+        lot_number:
+          $ref: "#/components/schemas/LotNumber"
+        production_date:
+          type: string
+          format: date
+        expiration_date:
+          type: string
+          format: date
+        quantity_commissioned:
+          type: integer
+          minimum: 1
+        commissioned_location_id:
+          type: string
+          format: uuid
+          description: A location of the owner.
+        status:
+          $ref: "#/components/schemas/LotStatus"
+        recalled_at:
+          type: [string, "null"]
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    LotCommissionRequest:
+      type: object
+      additionalProperties: false
+      required: [product_id, lot_number, production_date, expiration_date, quantity_commissioned, commissioned_location_id]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+          description: An active product of the caller's tenant.
+        lot_number:
+          $ref: "#/components/schemas/LotNumber"
+        production_date:
+          type: string
+          format: date
+        expiration_date:
+          type: string
+          format: date
+          description: Not earlier than `production_date`.
+        quantity_commissioned:
+          type: integer
+          minimum: 1
+          maximum: 2147483647
+        commissioned_location_id:
+          type: string
+          format: uuid
+          description: An active location of the caller's tenant, where the goods were produced or stored.
+    LotPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Lot"
+        next_cursor:
+          type: [string, "null"]
+          description: Pass as `cursor` to read the next page; `null` on the last page.
+    Balance:
+      type: object
+      description: The stock of one lot at one location of the caller's tenant.
+      required: [location, lot, quantity_on_hand, updated_at]
+      properties:
+        location:
+          type: object
+          required: [id, gln, name]
+          properties:
+            id:
+              type: string
+              format: uuid
+            gln:
+              type: string
+              pattern: "^[0-9]{13}$"
+            name:
+              type: string
+        lot:
+          type: object
+          required: [id, lot_number, gtin, product_name, expiration_date, status]
+          properties:
+            id:
+              type: string
+              format: uuid
+            lot_number:
+              $ref: "#/components/schemas/LotNumber"
+            gtin:
+              type: string
+              pattern: "^[0-9]{14}$"
+            product_name:
+              type: string
+            expiration_date:
+              type: string
+              format: date
+            status:
+              $ref: "#/components/schemas/LotStatus"
+        quantity_on_hand:
+          type: integer
+          minimum: 1
+        updated_at:
+          type: string
+          format: date-time
+    BalancePage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Balance"
         next_cursor:
           type: [string, "null"]
           description: Pass as `cursor` to read the next page; `null` on the last page.

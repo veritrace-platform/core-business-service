@@ -204,3 +204,28 @@ func TestConflict(t *testing.T) {
 		t.Errorf("status = %d, problem = %+v", rec.Code, p)
 	}
 }
+
+func TestValidatorUUIDAndDate(t *testing.T) {
+	var v rest.Validator
+	id, idOK := v.UUID("product_id", "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d8e")
+	day, dayOK := v.Date("expiration_date", "2026-12-31")
+	if !idOK || id.String() != "0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d8e" || !dayOK || day.String() != "2026-12-31" || !v.Valid() {
+		t.Errorf("valid values: %s %v, %s %v; errors %v", id, idOK, day, dayOK, codes(v.Problem()))
+	}
+
+	v = rest.Validator{}
+	v.UUID("missing_id", "")
+	v.UUID("bad_id", "42")
+	v.Date("missing_date", "")
+	v.Date("bad_date", "31/12/2026")
+	got := codes(v.Problem())
+	want := map[string]string{
+		"missing_id": httpx.FieldRequired, "bad_id": httpx.FieldInvalidFormat,
+		"missing_date": httpx.FieldRequired, "bad_date": httpx.FieldInvalidFormat,
+	}
+	for field, code := range want {
+		if got[field] != code {
+			t.Errorf("%s: %q, want %q", field, got[field], code)
+		}
+	}
+}

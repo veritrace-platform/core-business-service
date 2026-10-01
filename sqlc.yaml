@@ -45,6 +45,14 @@ sql:
             go_type:
               type: float64
               pointer: true
+          - db_type: date
+            go_type: github.com/veritrace-platform/core-business-service/internal/calendar.Date
+          - db_type: date
+            nullable: true
+            go_type:
+              import: github.com/veritrace-platform/core-business-service/internal/calendar
+              type: Date
+              pointer: true
   - engine: postgresql
     schema: migrations
     queries: internal/auth/queries
@@ -73,6 +81,20 @@ sql:
       go:
         <<: *go
         out: internal/product/queries
+  - engine: postgresql
+    schema: migrations
+    queries: internal/lot/queries
+    gen:
+      go:
+        <<: *go
+        out: internal/lot/queries
+  - engine: postgresql
+    schema: migrations
+    queries: internal/inventory/queries
+    gen:
+      go:
+        <<: *go
+        out: internal/inventory/queries
   - engine: postgresql
     schema: migrations
     queries: internal/directory/queries
