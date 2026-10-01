@@ -104,7 +104,7 @@ func TestRegisterTenant(t *testing.T) {
 		if _, err := store.RegisterTenant(t.Context(), first, testHash); err != nil {
 			t.Fatalf("RegisterTenant() error = %v", err)
 		}
-		// The API rejects this GLN for the prefix first; the unique constraint is the last line of defense.
+		// The API rejects this GLN for the prefix first; the unique constraint is the backstop.
 		second := registration(301, "8933001")
 		second.Headquarters.GLN = first.Headquarters.GLN
 		var conflict *tenant.ConflictError
