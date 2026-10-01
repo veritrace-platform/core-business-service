@@ -24,6 +24,8 @@ tags:
       through the frontend's session routes (ADR-0021), which keep the refresh token in an `HttpOnly` cookie.
   - name: Account
     description: The signed-in user's own account.
+  - name: Users
+    description: The users of the caller's tenant.
 paths:
   /api/v1/tenants:
     post:
@@ -300,6 +302,222 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/tenant:
+    get:
+      operationId: getTenantProfile
+      tags: [Tenants]
+      summary: The caller's tenant
+      description: "`ADMIN` only. Every user sees a summary of its tenant in `GET /api/v1/me`."
+      responses:
+        "200":
+          description: The tenant profile.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    patch:
+      operationId: updateTenantProfile
+      tags: [Tenants]
+      summary: Update the caller's tenant
+      description: |
+        `ADMIN` only. A JSON merge patch of the legal name and the SSCC extension digit; a new extension digit
+        opens a new SSCC serial space when the current one is exhausted. The code, tax code, and company prefix
+        identify the tenant and cannot change (`UNKNOWN_FIELD`).
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: "#/components/schemas/TenantPatch"
+            example:
+              legal_name: Saigon Fresh Foods Joint Stock Company
+      responses:
+        "200":
+          description: The updated tenant profile.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/users:
+    get:
+      operationId: listUsers
+      tags: [Users]
+      summary: List users
+      description: |
+        Newest first. `ADMIN` sees every user of the tenant. `WAREHOUSE_MANAGER` may list drivers only, with
+        `role=DRIVER`, to assign them to shipments; any other query answers 403.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: role
+          in: query
+          schema:
+            $ref: "#/components/schemas/Role"
+        - name: is_active
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: A page of users.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: createUser
+      tags: [Users]
+      summary: Create a user
+      description: |
+        `ADMIN` only. The admin sets the first password and hands it over; the user can change it with
+        `POST /api/v1/me/password`. Email addresses are unique across all tenants, ignoring case.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserCreateRequest"
+            example:
+              email: binh@sgfresh.example
+              password: initial-password-2026
+              full_name: Tran Van Binh
+              phone: "0901 234 567"
+              role: DRIVER
+      responses:
+        "201":
+          description: The user is created. `Location` points to it.
+          headers:
+            Location:
+              schema:
+                type: string
+                example: /api/v1/users/0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d91
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/users/{user_id}:
+    parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getUser
+      tags: [Users]
+      summary: Read a user
+      description: "`ADMIN` only."
+      responses:
+        "200":
+          description: The user.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    patch:
+      operationId: updateUser
+      tags: [Users]
+      summary: Update a user
+      description: |
+        `ADMIN` only. A JSON merge patch of the name, phone (`null` or an empty string clears it), role, and
+        active flag. Admins cannot change their own role or deactivate themselves (403), so every tenant keeps
+        an active admin. Deactivating a user revokes its sessions, and it is signed out at its next refresh;
+        role changes take effect at the next refresh as well.
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: "#/components/schemas/UserPatch"
+            example:
+              is_active: false
+      responses:
+        "200":
+          description: The updated user.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "413":
@@ -626,6 +844,62 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/JWK"
+    TenantPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        legal_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        sscc_extension_digit:
+          type: integer
+          minimum: 0
+          maximum: 9
+    UserCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password, full_name, role]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          $ref: "#/components/schemas/Password"
+        full_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        phone:
+          $ref: "#/components/schemas/Phone"
+        role:
+          $ref: "#/components/schemas/Role"
+    UserPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        full_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        phone:
+          $ref: "#/components/schemas/Phone"
+        role:
+          $ref: "#/components/schemas/Role"
+        is_active:
+          type: boolean
+    UserPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+        next_cursor:
+          type: [string, "null"]
+          description: Pass as `cursor` to read the next page; `null` on the last page.
     TenantRegistrationRequest:
       type: object
       additionalProperties: false

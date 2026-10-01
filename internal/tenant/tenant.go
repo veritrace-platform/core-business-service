@@ -96,3 +96,11 @@ func (e *ConflictError) Error() string {
 
 // ErrNotFound reports a tenant that does not exist or is not visible.
 var ErrNotFound = errors.New("tenant not found")
+
+// ProfilePatch lists the changes to a tenant profile; nil fields stay as they are. The code, tax code, and
+// company prefix identify the tenant and never change.
+type ProfilePatch struct {
+	LegalName *string
+	// SSCCExtensionDigit starts a new SSCC serial space when the current one is exhausted.
+	SSCCExtensionDigit *int
+}

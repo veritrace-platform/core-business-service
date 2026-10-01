@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/veritrace-platform/core-business-service/internal/gs1"
+	"github.com/veritrace-platform/core-business-service/internal/identity"
 	"github.com/veritrace-platform/core-business-service/internal/location"
 	"github.com/veritrace-platform/core-business-service/internal/platform/httpx"
 	"github.com/veritrace-platform/core-business-service/internal/rest"
@@ -21,22 +22,38 @@ type Registerer interface {
 	Register(ctx context.Context, r Registration) (Registered, error)
 }
 
+// ProfileService reads and changes the caller's tenant.
+type ProfileService interface {
+	Profile(ctx context.Context, p identity.Principal) (Tenant, error)
+	UpdateProfile(ctx context.Context, p identity.Principal, patch ProfilePatch) (Tenant, error)
+}
+
 // Handler serves the tenant endpoints.
 type Handler struct {
 	registerer Registerer
-	logger     *slog.Logger
+	profiles   ProfileService
 	// throttle limits registrations per client address (rest-api.md §1).
 	throttle func(http.Handler) http.Handler
+	// authenticate requires a valid access token.
+	authenticate func(http.Handler) http.Handler
+	logger       *slog.Logger
 }
 
-// NewHandler returns a Handler. throttle wraps the public registration endpoint.
-func NewHandler(registerer Registerer, throttle func(http.Handler) http.Handler, logger *slog.Logger) *Handler {
-	return &Handler{registerer: registerer, throttle: throttle, logger: logger}
+// NewHandler returns a Handler. throttle wraps the public registration endpoint, and authenticate the profile.
+func NewHandler(registerer Registerer, profiles ProfileService, throttle, authenticate func(http.Handler) http.Handler,
+	logger *slog.Logger,
+) *Handler {
+	return &Handler{registerer: registerer, profiles: profiles, throttle: throttle, authenticate: authenticate, logger: logger}
 }
 
 // Routes registers the tenant endpoints under /api/v1.
 func (h *Handler) Routes(r chi.Router) {
 	r.With(h.throttle).Post("/tenants", h.register)
+	r.Group(func(r chi.Router) {
+		r.Use(h.authenticate)
+		r.Get("/tenant", h.profile)
+		r.Patch("/tenant", h.updateProfile)
+	})
 }
 
 type registrationRequest struct {
@@ -182,4 +199,68 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 		slog.String("tenant_code", registered.Tenant.Code))
 	w.Header().Set("Location", "/api/v1/tenant")
 	httpx.WriteJSON(w, r, http.StatusCreated, registered)
+}
+
+func (h *Handler) profile(w http.ResponseWriter, r *http.Request) {
+	p, ok := rest.Principal(w, r)
+	if !ok {
+		return
+	}
+	t, err := h.profiles.Profile(r.Context(), p)
+	if err != nil {
+		h.profileFailed(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, r, http.StatusOK, t)
+}
+
+func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
+	p, ok := rest.Principal(w, r)
+	if !ok {
+		return
+	}
+	var patch rest.Patch
+	if problem := httpx.DecodeJSON(w, r, &patch); problem != nil {
+		httpx.WriteProblem(w, r, *problem)
+		return
+	}
+	var v rest.Validator
+	var changes ProfilePatch
+	if name := rest.PatchField[string](&v, patch, "legal_name"); name.Set {
+		if name.Null {
+			v.Add("legal_name", httpx.FieldRequired, "cannot be null")
+		} else if v.Text("legal_name", &name.Value, 1, 255) {
+			changes.LegalName = &name.Value
+		}
+	}
+	if digit := rest.PatchField[int](&v, patch, "sscc_extension_digit"); digit.Set {
+		if digit.Null {
+			v.Add("sscc_extension_digit", httpx.FieldRequired, "cannot be null")
+		} else if v.Int("sscc_extension_digit", digit.Value, 0, 9) {
+			changes.SSCCExtensionDigit = &digit.Value
+		}
+	}
+	v.OnlyFields(patch, "legal_name", "sscc_extension_digit")
+	if problem := v.Problem(); problem != nil {
+		httpx.WriteProblem(w, r, *problem)
+		return
+	}
+
+	t, err := h.profiles.UpdateProfile(r.Context(), p, changes)
+	if err != nil {
+		h.profileFailed(w, r, err)
+		return
+	}
+	h.logger.InfoContext(r.Context(), "tenant profile updated")
+	httpx.WriteJSON(w, r, http.StatusOK, t)
+}
+
+func (h *Handler) profileFailed(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case rest.Denied(w, r, err):
+	case errors.Is(err, ErrNotFound):
+		httpx.NotFound(w, r)
+	default:
+		rest.InternalError(w, r, h.logger, err)
+	}
 }

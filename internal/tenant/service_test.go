@@ -28,7 +28,7 @@ func (f *fakeRegistrar) RegisterTenant(_ context.Context, r tenant.Registration,
 
 func TestServiceRegisterStoresThePasswordHash(t *testing.T) {
 	registrar := &fakeRegistrar{}
-	svc := tenant.NewService(registrar, fakeHasher{})
+	svc := tenant.NewService(registrar, nil, fakeHasher{})
 
 	got, err := svc.Register(t.Context(), tenant.Registration{Code: "SGFRESH", Admin: tenant.Admin{Password: "secret password"}})
 	if err != nil || got.Tenant.Code != "SGFRESH" {
@@ -41,14 +41,14 @@ func TestServiceRegisterStoresThePasswordHash(t *testing.T) {
 
 func TestServiceRegisterPassesErrorsThrough(t *testing.T) {
 	conflict := &tenant.ConflictError{Key: tenant.KeyCode}
-	svc := tenant.NewService(&fakeRegistrar{err: conflict}, fakeHasher{})
+	svc := tenant.NewService(&fakeRegistrar{err: conflict}, nil, fakeHasher{})
 	var got *tenant.ConflictError
 	if _, err := svc.Register(t.Context(), tenant.Registration{}); !errors.As(err, &got) || got.Key != tenant.KeyCode {
 		t.Errorf("Register() error = %v, want the conflict", err)
 	}
 
 	hashErr := errors.New("no slot")
-	svc = tenant.NewService(&fakeRegistrar{}, fakeHasher{err: hashErr})
+	svc = tenant.NewService(&fakeRegistrar{}, nil, fakeHasher{err: hashErr})
 	if _, err := svc.Register(t.Context(), tenant.Registration{}); !errors.Is(err, hashErr) {
 		t.Errorf("Register() error = %v, want the hashing error", err)
 	}

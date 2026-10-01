@@ -40,7 +40,7 @@ func registration(n int, prefix string) tenant.Registration {
 
 func TestRegisterTenant(t *testing.T) {
 	db := tenancytest.Start(t)
-	store := tenant.NewStore(db.App)
+	store := tenant.NewStore(db.App, db.Tenancy)
 
 	t.Run("creates the tenant, its headquarters, and its admin", func(t *testing.T) {
 		r := registration(1, "8930001")

@@ -13,6 +13,50 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getTenant = `-- name: GetTenant :one
+SELECT
+    id,
+    code,
+    legal_name,
+    tax_code,
+    gs1_company_prefix,
+    sscc_extension_digit,
+    status,
+    created_at,
+    updated_at
+FROM core.tenants
+WHERE id = $1
+`
+
+type GetTenantRow struct {
+	ID                 uuid.UUID
+	Code               string
+	LegalName          string
+	TaxCode            string
+	Gs1CompanyPrefix   string
+	SsccExtensionDigit int16
+	Status             string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+func (q *Queries) GetTenant(ctx context.Context, id uuid.UUID) (GetTenantRow, error) {
+	row := q.db.QueryRow(ctx, getTenant, id)
+	var i GetTenantRow
+	err := row.Scan(
+		&i.ID,
+		&i.Code,
+		&i.LegalName,
+		&i.TaxCode,
+		&i.Gs1CompanyPrefix,
+		&i.SsccExtensionDigit,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const registerTenant = `-- name: RegisterTenant :one
 SELECT
     tenant_id,
@@ -90,6 +134,58 @@ func (q *Queries) RegisterTenant(ctx context.Context, arg RegisterTenantParams) 
 		&i.HeadquartersLocationID,
 		&i.AdminUserID,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const updateTenant = `-- name: UpdateTenant :one
+UPDATE core.tenants
+SET legal_name = coalesce($1, legal_name),
+    sscc_extension_digit = coalesce($2, sscc_extension_digit)
+WHERE id = $3
+RETURNING
+    id,
+    code,
+    legal_name,
+    tax_code,
+    gs1_company_prefix,
+    sscc_extension_digit,
+    status,
+    created_at,
+    updated_at
+`
+
+type UpdateTenantParams struct {
+	LegalName          *string
+	SsccExtensionDigit *int16
+	ID                 uuid.UUID
+}
+
+type UpdateTenantRow struct {
+	ID                 uuid.UUID
+	Code               string
+	LegalName          string
+	TaxCode            string
+	Gs1CompanyPrefix   string
+	SsccExtensionDigit int16
+	Status             string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+func (q *Queries) UpdateTenant(ctx context.Context, arg UpdateTenantParams) (UpdateTenantRow, error) {
+	row := q.db.QueryRow(ctx, updateTenant, arg.LegalName, arg.SsccExtensionDigit, arg.ID)
+	var i UpdateTenantRow
+	err := row.Scan(
+		&i.ID,
+		&i.Code,
+		&i.LegalName,
+		&i.TaxCode,
+		&i.Gs1CompanyPrefix,
+		&i.SsccExtensionDigit,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

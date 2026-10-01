@@ -3,12 +3,16 @@ package tenant
 import (
 	"context"
 	"errors"
+	"fmt"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/veritrace-platform/core-business-service/internal/identity"
 	"github.com/veritrace-platform/core-business-service/internal/location"
+	"github.com/veritrace-platform/core-business-service/internal/tenancy"
 	"github.com/veritrace-platform/core-business-service/internal/tenant/queries"
 	"github.com/veritrace-platform/core-business-service/internal/user"
 )
@@ -16,11 +20,59 @@ import (
 // Store keeps tenants in PostgreSQL.
 type Store struct {
 	pool queries.DBTX
+	db   *tenancy.DB
 }
 
-// NewStore returns a Store that registers tenants through pool, a connection pool of the runtime role.
-func NewStore(pool queries.DBTX) *Store {
-	return &Store{pool: pool}
+// NewStore returns a Store that registers tenants through pool, a connection pool of the runtime role, and runs
+// tenant-scoped work through db.
+func NewStore(pool queries.DBTX, db *tenancy.DB) *Store {
+	return &Store{pool: pool, db: db}
+}
+
+// WithTenantTx runs fn with a profile repository bound to one transaction of tenantID.
+func (s *Store) WithTenantTx(ctx context.Context, tenantID uuid.UUID, fn func(ProfileRepository) error) error {
+	return s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		return fn(profileRepository{q: queries.New(tx)})
+	})
+}
+
+type profileRepository struct {
+	q *queries.Queries
+}
+
+func (r profileRepository) Get(ctx context.Context, id uuid.UUID) (Tenant, error) {
+	row, err := r.q.GetTenant(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Tenant{}, ErrNotFound
+	}
+	if err != nil {
+		return Tenant{}, fmt.Errorf("read tenant: %w", err)
+	}
+	return tenantFromRow(row), nil
+}
+
+func (r profileRepository) Update(ctx context.Context, id uuid.UUID, p ProfilePatch) (Tenant, error) {
+	params := queries.UpdateTenantParams{ID: id, LegalName: p.LegalName}
+	if p.SSCCExtensionDigit != nil {
+		digit := int16(*p.SSCCExtensionDigit) //nolint:gosec // validated to 0-9
+		params.SsccExtensionDigit = &digit
+	}
+	row, err := r.q.UpdateTenant(ctx, params)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Tenant{}, ErrNotFound
+	}
+	if err != nil {
+		return Tenant{}, fmt.Errorf("update tenant: %w", err)
+	}
+	return tenantFromRow(queries.GetTenantRow(row)), nil
+}
+
+func tenantFromRow(row queries.GetTenantRow) Tenant {
+	return Tenant{
+		ID: row.ID, Code: row.Code, LegalName: row.LegalName, TaxCode: row.TaxCode,
+		GS1CompanyPrefix: row.Gs1CompanyPrefix, SSCCExtensionDigit: int(row.SsccExtensionDigit),
+		Status: Status(row.Status), CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+	}
 }
 
 // conflictKeys maps the unique constraints that registration can violate to registration keys.

@@ -18,6 +18,7 @@ import (
 	"github.com/veritrace-platform/core-business-service/internal/ratelimit"
 	"github.com/veritrace-platform/core-business-service/internal/tenancy"
 	"github.com/veritrace-platform/core-business-service/internal/tenant"
+	"github.com/veritrace-platform/core-business-service/internal/user"
 )
 
 // passwordHashConcurrency bounds concurrent Argon2id computations. Each holds 19 MiB, so four stay well
@@ -89,10 +90,13 @@ func NewHandler(cfg Config, deps Dependencies) (http.Handler, error) {
 		auth.NewService(auth.NewPostgresStore(deps.Pool, db), hasher, tokens, cfg.Auth.RefreshTokenTTL, now),
 		keys, throttle(), authenticate, deps.Logger,
 	)
-	tenants := tenant.NewHandler(tenant.NewService(tenant.NewStore(deps.Pool), hasher), throttle(), deps.Logger)
+	tenantStore := tenant.NewStore(deps.Pool, db)
+	tenants := tenant.NewService(tenantStore, tenantStore, hasher)
+	tenantHandler := tenant.NewHandler(tenants, tenants, throttle(), authenticate, deps.Logger)
+	users := user.NewHandler(user.NewService(user.NewPostgresStore(db), hasher, now), authenticate, deps.Logger)
 
 	return httpapi.NewRouter(deps.Logger, deps.Registerer, httpapi.Mounts{
-		API:       []httpapi.Routes{tenants.Routes, sessions.Routes},
+		API:       []httpapi.Routes{tenantHandler.Routes, sessions.Routes, users.Routes},
 		WellKnown: []httpapi.Routes{sessions.WellKnownRoutes},
 	}), nil
 }

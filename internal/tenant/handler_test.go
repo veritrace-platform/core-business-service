@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/veritrace-platform/core-business-service/internal/httpapi"
+	"github.com/veritrace-platform/core-business-service/internal/identity"
 	"github.com/veritrace-platform/core-business-service/internal/platform/httpx"
 	"github.com/veritrace-platform/core-business-service/internal/tenant"
 )
@@ -36,7 +37,21 @@ func (f *fakeRegisterer) Register(_ context.Context, r tenant.Registration) (ten
 }
 
 func newRouter(registerer tenant.Registerer) http.Handler {
-	h := tenant.NewHandler(registerer, func(next http.Handler) http.Handler { return next }, slog.New(slog.DiscardHandler))
+	return newProfileRouter(registerer, &fakeProfiles{}, nil)
+}
+
+// newProfileRouter serves the tenant endpoints; principal, when not nil, stands in for authentication.
+func newProfileRouter(registerer tenant.Registerer, profiles tenant.ProfileService, principal *identity.Principal) http.Handler {
+	authenticate := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if principal != nil {
+				r = r.WithContext(identity.NewContext(r.Context(), *principal))
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+	h := tenant.NewHandler(registerer, profiles, func(next http.Handler) http.Handler { return next }, authenticate,
+		slog.New(slog.DiscardHandler))
 	return httpapi.NewRouter(slog.New(slog.DiscardHandler), prometheus.NewRegistry(), httpapi.Mounts{
 		API: []httpapi.Routes{h.Routes},
 	})

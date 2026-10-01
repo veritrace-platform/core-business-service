@@ -335,3 +335,113 @@ func TestChangePasswordRevokesOtherSessions(t *testing.T) {
 		t.Errorf("new password: status = %d, want 200", resp.status)
 	}
 }
+
+func TestUserManagement(t *testing.T) {
+	a := startAPI(t)
+	tenant := a.db.CreateTenant(t)
+	admin, _ := a.login(tenant.Admin.Email, tenancytest.FixturePassword)
+
+	type userBody struct {
+		ID       string `json:"id"`
+		Email    string `json:"email"`
+		Role     string `json:"role"`
+		IsActive bool   `json:"is_active"`
+	}
+	var driver userBody
+	resp := a.do(request{method: http.MethodPost, path: "/api/v1/users", token: admin.AccessToken, body: map[string]any{
+		"email": "binh@fixture.example", "password": "a long enough password", "full_name": "Tran Van Binh", "role": "DRIVER",
+	}}, &driver)
+	if resp.status != http.StatusCreated || driver.Role != "DRIVER" || resp.header.Get("Location") != "/api/v1/users/"+driver.ID {
+		t.Fatalf("create driver: status = %d, user = %+v", resp.status, driver)
+	}
+	var problem httpx.Problem
+	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/users", token: admin.AccessToken, body: map[string]any{
+		"email": "BINH@fixture.example", "password": "a long enough password", "full_name": "Copy", "role": "DRIVER",
+	}}, &problem); resp.status != http.StatusConflict || problem.Errors[0].Field != "email" {
+		t.Errorf("duplicate email: status = %d, problem = %+v", resp.status, problem)
+	}
+
+	manager := a.db.CreateUser(t, tenant.ID, "WAREHOUSE_MANAGER")
+	managerSession, _ := a.login(manager.Email, tenancytest.FixturePassword)
+	var drivers struct {
+		Items      []userBody `json:"items"`
+		NextCursor *string    `json:"next_cursor"`
+	}
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/users?role=DRIVER", token: managerSession.AccessToken}, &drivers); resp.status != http.StatusOK ||
+		len(drivers.Items) != 1 || drivers.Items[0].ID != driver.ID || drivers.NextCursor != nil {
+		t.Errorf("manager listing drivers: status = %d, page = %+v", resp.status, drivers)
+	}
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/users", token: managerSession.AccessToken}, &problem); resp.status != http.StatusForbidden {
+		t.Errorf("manager listing everyone: status = %d, want 403", resp.status)
+	}
+
+	// Deactivating the driver signs it out at its next refresh.
+	driverSession, resp := a.login("binh@fixture.example", "a long enough password")
+	if resp.status != http.StatusOK {
+		t.Fatalf("driver login: status = %d", resp.status)
+	}
+	var updated userBody
+	if resp := a.do(request{method: http.MethodPatch, path: "/api/v1/users/" + driver.ID, token: admin.AccessToken,
+		body: map[string]any{"is_active": false}, header: map[string]string{"Content-Type": "application/merge-patch+json"}}, &updated); resp.status != http.StatusOK ||
+		updated.IsActive {
+		t.Fatalf("deactivate: status = %d, user = %+v", resp.status, updated)
+	}
+	if _, resp := a.refresh(driverSession.RefreshToken); resp.status != http.StatusUnauthorized {
+		t.Errorf("refresh after deactivation: status = %d, want 401", resp.status)
+	}
+	if _, resp := a.login("binh@fixture.example", "a long enough password"); resp.status != http.StatusUnauthorized {
+		t.Errorf("login after deactivation: status = %d, want 401", resp.status)
+	}
+
+	// An admin cannot demote itself, so the tenant keeps an admin.
+	if resp := a.do(request{method: http.MethodPatch, path: "/api/v1/users/" + tenant.Admin.ID.String(), token: admin.AccessToken,
+		body: map[string]any{"role": "DRIVER"}}, &problem); resp.status != http.StatusForbidden {
+		t.Errorf("self demotion: status = %d, want 403", resp.status)
+	}
+
+	// Another tenant's admin sees nothing of this tenant's users.
+	other := a.db.CreateTenant(t)
+	otherAdmin, _ := a.login(other.Admin.Email, tenancytest.FixturePassword)
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/users/" + driver.ID, token: otherAdmin.AccessToken}, &problem); resp.status != http.StatusNotFound {
+		t.Errorf("another tenant reading the driver: status = %d, want 404", resp.status)
+	}
+}
+
+func TestTenantProfile(t *testing.T) {
+	a := startAPI(t)
+	tenant := a.db.CreateTenant(t)
+	admin, _ := a.login(tenant.Admin.Email, tenancytest.FixturePassword)
+
+	var profile struct {
+		ID                 string `json:"id"`
+		Code               string `json:"code"`
+		LegalName          string `json:"legal_name"`
+		SSCCExtensionDigit int    `json:"sscc_extension_digit"`
+	}
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/tenant", token: admin.AccessToken}, &profile); resp.status != http.StatusOK ||
+		profile.ID != tenant.ID.String() || profile.Code != tenant.Code {
+		t.Fatalf("GET /tenant: status = %d, profile = %+v", resp.status, profile)
+	}
+	if resp := a.do(request{method: http.MethodPatch, path: "/api/v1/tenant", token: admin.AccessToken,
+		body: map[string]any{"legal_name": "Renamed Company", "sscc_extension_digit": 7}}, &profile); resp.status != http.StatusOK ||
+		profile.LegalName != "Renamed Company" || profile.SSCCExtensionDigit != 7 {
+		t.Errorf("PATCH /tenant: status = %d, profile = %+v", resp.status, profile)
+	}
+
+	var problem httpx.Problem
+	if resp := a.do(request{method: http.MethodPatch, path: "/api/v1/tenant", token: admin.AccessToken,
+		body: map[string]any{"gs1_company_prefix": "8930002"}}, &problem); resp.status != http.StatusBadRequest ||
+		problem.Errors[0].Code != "UNKNOWN_FIELD" {
+		t.Errorf("changing the prefix: status = %d, problem = %+v", resp.status, problem)
+	}
+
+	driver := a.db.CreateUser(t, tenant.ID, "DRIVER")
+	driverSession, _ := a.login(driver.Email, tenancytest.FixturePassword)
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/tenant", token: driverSession.AccessToken}, &problem); resp.status != http.StatusForbidden {
+		t.Errorf("driver reading the profile: status = %d, want 403", resp.status)
+	}
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/tenant"}, &problem); resp.status != http.StatusUnauthorized ||
+		problem.Code != "UNAUTHENTICATED" {
+		t.Errorf("anonymous: status = %d, code = %s", resp.status, problem.Code)
+	}
+}

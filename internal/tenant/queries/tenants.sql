@@ -22,3 +22,33 @@ FROM core.register_tenant(
     sqlc.arg(admin_full_name),
     sqlc.narg(admin_phone)
 );
+
+-- name: GetTenant :one
+SELECT
+    id,
+    code,
+    legal_name,
+    tax_code,
+    gs1_company_prefix,
+    sscc_extension_digit,
+    status,
+    created_at,
+    updated_at
+FROM core.tenants
+WHERE id = sqlc.arg(id);
+
+-- name: UpdateTenant :one
+UPDATE core.tenants
+SET legal_name = coalesce(sqlc.narg(legal_name), legal_name),
+    sscc_extension_digit = coalesce(sqlc.narg(sscc_extension_digit), sscc_extension_digit)
+WHERE id = sqlc.arg(id)
+RETURNING
+    id,
+    code,
+    legal_name,
+    tax_code,
+    gs1_company_prefix,
+    sscc_extension_digit,
+    status,
+    created_at,
+    updated_at;

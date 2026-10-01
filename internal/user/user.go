@@ -3,6 +3,7 @@
 package user
 
 import (
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -37,3 +38,44 @@ type Me struct {
 	User
 	Tenant TenantSummary `json:"tenant"`
 }
+
+// NewUser is a validated request to add a user to the caller's tenant.
+type NewUser struct {
+	Email    string
+	Password string
+	FullName string
+	Phone    *string
+	Role     identity.Role
+}
+
+// Filter selects a page of users, newest first.
+type Filter struct {
+	Role     *identity.Role
+	IsActive *bool
+	// After is the last user of the previous page; uuid.Nil starts at the newest user.
+	After uuid.UUID
+	Limit int
+}
+
+// Patch lists the changes to a user; nil fields stay as they are. ClearPhone removes the phone number.
+type Patch struct {
+	FullName   *string
+	Phone      *string
+	ClearPhone bool
+	Role       *identity.Role
+	IsActive   *bool
+}
+
+// User errors.
+var (
+	// ErrNotFound reports a user that does not exist or belongs to another tenant.
+	ErrNotFound = errors.New("user not found")
+	// ErrEmailTaken reports an email address that another user, of any tenant, already has.
+	ErrEmailTaken = errors.New("email address already registered")
+	// ErrSelfChange reports an admin changing its own role or deactivating itself. Forbidding it keeps at least
+	// one active admin in every tenant.
+	ErrSelfChange = errors.New("admins cannot change their own role or deactivate themselves")
+	// ErrActorNotAdmin reports a caller whose token still says ADMIN although the account is no longer an active
+	// admin.
+	ErrActorNotAdmin = errors.New("the caller is no longer an active admin")
+)
