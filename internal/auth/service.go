@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/veritrace-platform/core-business-service/internal/identity"
+	"github.com/veritrace-platform/core-business-service/internal/policy"
 	"github.com/veritrace-platform/core-business-service/internal/tenant"
 	"github.com/veritrace-platform/core-business-service/internal/user"
 )
@@ -244,12 +245,20 @@ func (s *Service) ChangePassword(ctx context.Context, p identity.Principal, curr
 	if err != nil {
 		return fmt.Errorf("read password: %w", err)
 	}
-	match, _, err := s.hasher.Verify(ctx, current, stored)
-	if err != nil {
-		return fmt.Errorf("verify password: %w", err)
-	}
-	if !match {
+	err = policy.Evaluate(policy.Request{
+		Action: policy.ChangeOwnPassword, Role: p.Role, Parties: []policy.Party{policy.Self},
+		Facts: func(policy.Check) (bool, error) {
+			// The only check of this action is the current password.
+			match, _, err := s.hasher.Verify(ctx, current, stored)
+			return match, err
+		},
+	})
+	var denial *policy.DenialError
+	switch {
+	case errors.As(err, &denial) && denial.Check == policy.CurrentPassword:
 		return ErrIncorrectPassword
+	case err != nil:
+		return fmt.Errorf("authorize password change: %w", err)
 	}
 	hash, err := s.hasher.Hash(ctx, replacement)
 	if err != nil {
