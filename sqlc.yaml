@@ -1,0 +1,45 @@
+# sqlc generates typed Go from the SQL next to each domain package (ADR-0004).
+# Regenerate with `make generate`; CI fails when the generated code is out of date.
+version: "2"
+sql:
+  - engine: postgresql
+    schema: migrations
+    queries: internal/tenant/queries
+    gen:
+      go: &go
+        package: queries
+        out: internal/tenant/queries
+        sql_package: pgx/v5
+        emit_pointers_for_null_types: true
+        omit_unused_structs: true
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type:
+              import: github.com/google/uuid
+              type: UUID
+              pointer: true
+          - db_type: timestamptz
+            go_type: time.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type:
+              import: time
+              type: Time
+              pointer: true
+  - engine: postgresql
+    schema: migrations
+    queries: internal/auth/queries
+    gen:
+      go:
+        <<: *go
+        out: internal/auth/queries
+  - engine: postgresql
+    schema: migrations
+    queries: internal/user/queries
+    gen:
+      go:
+        <<: *go
+        out: internal/user/queries

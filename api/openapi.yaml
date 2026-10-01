@@ -15,8 +15,517 @@ servers:
     description: Local gateway
 security:
   - bearerAuth: []
-tags: []
-paths: {}
+tags:
+  - name: Tenants
+    description: Tenant registration and the tenant profile.
+  - name: Authentication
+    description: |
+      Sign-in, token refresh, sign-out, and token verification keys (ADR-0007). Browsers reach these endpoints
+      through the frontend's session routes (ADR-0021), which keep the refresh token in an `HttpOnly` cookie.
+  - name: Account
+    description: The signed-in user's own account.
+  - name: Users
+    description: The users of the caller's tenant.
+paths:
+  /api/v1/tenants:
+    post:
+      operationId: registerTenant
+      tags: [Tenants]
+      summary: Register a tenant
+      description: |
+        Creates a tenant with its headquarters location and first admin user, who gets the `ADMIN` role.
+        Public, and limited to 10 requests per minute per client address.
+
+        The headquarters GLN must start with the GS1 company prefix. The prefix must not equal, extend, or be
+        extended by a registered prefix; such a prefix is rejected with `409 IDENTIFIER_ALREADY_REGISTERED` on
+        `tenant.gs1_company_prefix`. Text fields are trimmed.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantRegistrationRequest"
+            example:
+              tenant:
+                code: SGFRESH
+                legal_name: Saigon Fresh Foods Joint Stock Company
+                tax_code: "0312345678"
+                gs1_company_prefix: "8930001"
+              headquarters:
+                gln: "8930001001015"
+                name: Saigon Fresh Foods headquarters
+                address: 12 Nguyen Hue Boulevard, Ben Nghe Ward
+                city: Ho Chi Minh City
+                latitude: 10.773547
+                longitude: 106.703945
+                geo_fence_radius_meters: 200
+              admin:
+                email: admin@sgfresh.example
+                password: correct-horse-battery
+                full_name: Nguyen Van An
+                phone: "+84 28 3822 1234"
+      responses:
+        "201":
+          description: The tenant is registered. `Location` points to the tenant profile.
+          headers:
+            Location:
+              description: Path of the tenant profile.
+              schema:
+                type: string
+                example: /api/v1/tenant
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantRegistration"
+              example:
+                tenant:
+                  id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d8e
+                  code: SGFRESH
+                  legal_name: Saigon Fresh Foods Joint Stock Company
+                  tax_code: "0312345678"
+                  gs1_company_prefix: "8930001"
+                  sscc_extension_digit: 0
+                  status: ACTIVE
+                  created_at: "2026-09-30T08:00:00.123456Z"
+                  updated_at: "2026-09-30T08:00:00.123456Z"
+                headquarters:
+                  id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d8f
+                  gln: "8930001001015"
+                  name: Saigon Fresh Foods headquarters
+                  address: 12 Nguyen Hue Boulevard, Ben Nghe Ward
+                  city: Ho Chi Minh City
+                  country_code: VN
+                  latitude: 10.773547
+                  longitude: 106.703945
+                  geo_fence_radius_meters: 200
+                  is_headquarters: true
+                  is_active: true
+                  created_at: "2026-09-30T08:00:00.123456Z"
+                  updated_at: "2026-09-30T08:00:00.123456Z"
+                admin:
+                  id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d90
+                  email: admin@sgfresh.example
+                  full_name: Nguyen Van An
+                  phone: "+84 28 3822 1234"
+                  role: ADMIN
+                  is_active: true
+                  last_login_at: null
+                  created_at: "2026-09-30T08:00:00.123456Z"
+                  updated_at: "2026-09-30T08:00:00.123456Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/auth/login:
+    post:
+      operationId: login
+      tags: [Authentication]
+      summary: Sign in
+      description: |
+        Checks the email (case-insensitive) and password and starts a session. Public, and limited to 10
+        requests per minute per client address. The same `INVALID_CREDENTIALS` answers an unknown email, a wrong
+        password, a deactivated user, and a suspended tenant.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+            example:
+              email: admin@sgfresh.example
+              password: correct-horse-battery
+      responses:
+        "200":
+          $ref: "#/components/responses/Session"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/auth/refresh:
+    post:
+      operationId: refreshSession
+      tags: [Authentication]
+      summary: Rotate the refresh token
+      description: |
+        Exchanges a refresh token for a new access token and a new refresh token; the presented token stops
+        working. Presenting a rotated token again revokes every token of its session family. Unknown, expired,
+        revoked, and reused tokens, and tokens of users who may no longer sign in, answer
+        `401 REFRESH_TOKEN_INVALID`. Clients coalesce concurrent refreshes into one request.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshTokenRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/Session"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/auth/logout:
+    post:
+      operationId: logout
+      tags: [Authentication]
+      summary: Sign out
+      description: |
+        Revokes the session family of a refresh token. Unknown and already revoked tokens also answer 204, so
+        signing out is idempotent. Access tokens stay valid until they expire (at most 15 minutes).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshTokenRequest"
+      responses:
+        "204":
+          description: Signed out.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /.well-known/jwks.json:
+    get:
+      operationId: getJwks
+      tags: [Authentication]
+      summary: Token verification keys
+      description: |
+        Ed25519 public keys that verify access tokens. Tokens name their key in the `kid` header. During a key
+        rotation the set lists both keys. Cacheable for five minutes.
+      security: []
+      responses:
+        "200":
+          description: The JSON Web Key Set.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: public, max-age=300
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JWKS"
+              example:
+                keys:
+                  - kty: OKP
+                    crv: Ed25519
+                    kid: "2026-09"
+                    x: 11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo
+                    alg: EdDSA
+                    use: sig
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/me:
+    get:
+      operationId: getMe
+      tags: [Account]
+      summary: The signed-in user
+      description: The user of the access token, with a summary of its tenant.
+      responses:
+        "200":
+          description: The signed-in user.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/me/password:
+    post:
+      operationId: changeOwnPassword
+      tags: [Account]
+      summary: Change the own password
+      description: |
+        Replaces the password after checking the current one. Every other session of the user is revoked; the
+        session that made the request stays signed in. A wrong current password answers
+        `400 VALIDATION_FAILED` with the field code `INCORRECT` on `current_password`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordChangeRequest"
+      responses:
+        "204":
+          description: The password is changed.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/tenant:
+    get:
+      operationId: getTenantProfile
+      tags: [Tenants]
+      summary: The caller's tenant
+      description: "`ADMIN` only. Every user sees a summary of its tenant in `GET /api/v1/me`."
+      responses:
+        "200":
+          description: The tenant profile.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    patch:
+      operationId: updateTenantProfile
+      tags: [Tenants]
+      summary: Update the caller's tenant
+      description: |
+        `ADMIN` only. A JSON merge patch of the legal name and the SSCC extension digit; a new extension digit
+        opens a new SSCC serial space when the current one is exhausted. The code, tax code, and company prefix
+        identify the tenant and cannot change (`UNKNOWN_FIELD`).
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: "#/components/schemas/TenantPatch"
+            example:
+              legal_name: Saigon Fresh Foods Joint Stock Company
+      responses:
+        "200":
+          description: The updated tenant profile.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/users:
+    get:
+      operationId: listUsers
+      tags: [Users]
+      summary: List users
+      description: |
+        Newest first. `ADMIN` sees every user of the tenant. `WAREHOUSE_MANAGER` may list drivers only, with
+        `role=DRIVER`, to assign them to shipments; any other query answers 403.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: role
+          in: query
+          schema:
+            $ref: "#/components/schemas/Role"
+        - name: is_active
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: A page of users.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: createUser
+      tags: [Users]
+      summary: Create a user
+      description: |
+        `ADMIN` only. The admin sets the first password and hands it over; the user can change it with
+        `POST /api/v1/me/password`. Email addresses are unique across all tenants, ignoring case.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserCreateRequest"
+            example:
+              email: binh@sgfresh.example
+              password: initial-password-2026
+              full_name: Tran Van Binh
+              phone: "0901 234 567"
+              role: DRIVER
+      responses:
+        "201":
+          description: The user is created. `Location` points to it.
+          headers:
+            Location:
+              schema:
+                type: string
+                example: /api/v1/users/0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d91
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/users/{user_id}:
+    parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getUser
+      tags: [Users]
+      summary: Read a user
+      description: "`ADMIN` only."
+      responses:
+        "200":
+          description: The user.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    patch:
+      operationId: updateUser
+      tags: [Users]
+      summary: Update a user
+      description: |
+        `ADMIN` only. A JSON merge patch of the name, phone (`null` or an empty string clears it), role, and
+        active flag. Admins cannot change their own role or deactivate themselves (403), so every tenant keeps
+        an active admin. Deactivating a user revokes its sessions, and it is signed out at its next refresh;
+        role changes take effect at the next refresh as well.
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: "#/components/schemas/UserPatch"
+            example:
+              is_active: false
+      responses:
+        "200":
+          description: The updated user.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   securitySchemes:
     bearerAuth:
@@ -90,6 +599,397 @@ components:
           example: CHECK_DIGIT
         message:
           type: string
+    Tenant:
+      type: object
+      description: A company registered on VeriTrace.
+      required: [id, code, legal_name, tax_code, gs1_company_prefix, sscc_extension_digit, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          description: Short unique code, used by other tenants to select a carrier or inspector.
+          pattern: "^[A-Z0-9_]{3,32}$"
+        legal_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        tax_code:
+          type: string
+          pattern: "^[0-9]{10}(-[0-9]{3})?$"
+        gs1_company_prefix:
+          type: string
+          description: GS1 company prefix (GCP). Every GLN and GTIN of the tenant starts with it.
+          pattern: "^[0-9]{6,10}$"
+        sscc_extension_digit:
+          type: integer
+          description: First digit of the SSCCs the tenant issues.
+          minimum: 0
+          maximum: 9
+        status:
+          type: string
+          description: Users of a `SUSPENDED` tenant cannot sign in.
+          enum: [ACTIVE, SUSPENDED]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Location:
+      type: object
+      description: A warehouse, hub, or headquarters of the caller's tenant.
+      required: [id, gln, name, address, city, country_code, latitude, longitude, geo_fence_radius_meters, is_headquarters, is_active, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        gln:
+          type: string
+          pattern: "^[0-9]{13}$"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        address:
+          type: string
+          minLength: 1
+          maxLength: 500
+        city:
+          type: string
+          minLength: 1
+          maxLength: 100
+        country_code:
+          type: string
+          description: ISO 3166-1 alpha-2 code.
+          pattern: "^[A-Z]{2}$"
+        latitude:
+          type: number
+          description: WGS-84 degrees, 6 decimals.
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          description: WGS-84 degrees, 6 decimals.
+          minimum: -180
+          maximum: 180
+        geo_fence_radius_meters:
+          type: integer
+          minimum: 50
+          maximum: 5000
+        is_headquarters:
+          type: boolean
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Role:
+      type: string
+      description: The user's role within its tenant. `INSPECTOR` gains permissions in M2.
+      enum: [ADMIN, WAREHOUSE_MANAGER, DRIVER, INSPECTOR]
+    User:
+      type: object
+      description: A user of the caller's tenant.
+      required: [id, email, full_name, phone, role, is_active, last_login_at, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        full_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        phone:
+          type: [string, "null"]
+          minLength: 6
+          maxLength: 32
+        role:
+          $ref: "#/components/schemas/Role"
+        is_active:
+          type: boolean
+          description: Inactive users cannot sign in or refresh their session.
+        last_login_at:
+          type: [string, "null"]
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Password:
+      type: string
+      description: 12 to 128 characters; any characters are allowed and nothing is trimmed.
+      format: password
+      minLength: 12
+      maxLength: 128
+    Phone:
+      type: [string, "null"]
+      description: Digits, spaces, and `+ ( ) . -`, 6 to 32 characters. `null` or an empty string clears it.
+      pattern: "^\\+?[0-9(][0-9 ().-]*[0-9]$"
+      minLength: 6
+      maxLength: 32
+    TenantSummary:
+      type: object
+      description: The tenant of the signed-in user.
+      required: [id, code, legal_name, gs1_company_prefix, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        legal_name:
+          type: string
+        gs1_company_prefix:
+          type: string
+          description: Every GLN and GTIN the tenant registers starts with it; forms validate against it.
+        status:
+          type: string
+          enum: [ACTIVE, SUSPENDED]
+    Me:
+      description: The signed-in user and its tenant.
+      allOf:
+        - $ref: "#/components/schemas/User"
+        - type: object
+          required: [tenant]
+          properties:
+            tenant:
+              $ref: "#/components/schemas/TenantSummary"
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          maxLength: 254
+        password:
+          type: string
+          format: password
+    RefreshTokenRequest:
+      type: object
+      additionalProperties: false
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+    PasswordChangeRequest:
+      type: object
+      additionalProperties: false
+      required: [current_password, new_password]
+      properties:
+        current_password:
+          type: string
+          format: password
+        new_password:
+          $ref: "#/components/schemas/Password"
+    Session:
+      type: object
+      description: A new access token, the refresh token that replaces the presented one, and the user.
+      required: [access_token, token_type, expires_in, refresh_token, refresh_token_expires_in, user]
+      properties:
+        access_token:
+          type: string
+          description: EdDSA-signed JWT with the claims `sub`, `tid`, `role`, `iat`, `exp`, and `jti`.
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+          description: Seconds until the access token expires (900).
+        refresh_token:
+          type: string
+          description: Opaque, single-use token. Keep it out of scripts (ADR-0021).
+        refresh_token_expires_in:
+          type: integer
+          description: Seconds until the refresh token expires; each refresh starts a new period.
+        user:
+          $ref: "#/components/schemas/Me"
+    JWK:
+      type: object
+      required: [kty, crv, kid, x, alg, use]
+      properties:
+        kty:
+          type: string
+          enum: [OKP]
+        crv:
+          type: string
+          enum: [Ed25519]
+        kid:
+          type: string
+        x:
+          type: string
+          description: The public key, base64url without padding.
+        alg:
+          type: string
+          enum: [EdDSA]
+        use:
+          type: string
+          enum: [sig]
+    JWKS:
+      type: object
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          items:
+            $ref: "#/components/schemas/JWK"
+    TenantPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        legal_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        sscc_extension_digit:
+          type: integer
+          minimum: 0
+          maximum: 9
+    UserCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password, full_name, role]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          $ref: "#/components/schemas/Password"
+        full_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        phone:
+          $ref: "#/components/schemas/Phone"
+        role:
+          $ref: "#/components/schemas/Role"
+    UserPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        full_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        phone:
+          $ref: "#/components/schemas/Phone"
+        role:
+          $ref: "#/components/schemas/Role"
+        is_active:
+          type: boolean
+    UserPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+        next_cursor:
+          type: [string, "null"]
+          description: Pass as `cursor` to read the next page; `null` on the last page.
+    TenantRegistrationRequest:
+      type: object
+      additionalProperties: false
+      required: [tenant, headquarters, admin]
+      properties:
+        tenant:
+          type: object
+          additionalProperties: false
+          required: [code, legal_name, tax_code, gs1_company_prefix]
+          properties:
+            code:
+              type: string
+              pattern: "^[A-Z0-9_]{3,32}$"
+            legal_name:
+              type: string
+              minLength: 1
+              maxLength: 255
+            tax_code:
+              type: string
+              pattern: "^[0-9]{10}(-[0-9]{3})?$"
+            gs1_company_prefix:
+              type: string
+              pattern: "^[0-9]{6,10}$"
+        headquarters:
+          type: object
+          additionalProperties: false
+          required: [gln, name, address, city, latitude, longitude]
+          properties:
+            gln:
+              type: string
+              description: Must start with `tenant.gs1_company_prefix` and end with a valid check digit.
+              pattern: "^[0-9]{13}$"
+            name:
+              type: string
+              minLength: 1
+              maxLength: 255
+            address:
+              type: string
+              minLength: 1
+              maxLength: 500
+            city:
+              type: string
+              minLength: 1
+              maxLength: 100
+            country_code:
+              type: string
+              pattern: "^[A-Z]{2}$"
+              default: VN
+            latitude:
+              type: number
+              description: Rounded to 6 decimals.
+              minimum: -90
+              maximum: 90
+            longitude:
+              type: number
+              description: Rounded to 6 decimals.
+              minimum: -180
+              maximum: 180
+            geo_fence_radius_meters:
+              type: integer
+              minimum: 50
+              maximum: 5000
+              default: 200
+        admin:
+          type: object
+          additionalProperties: false
+          required: [email, password, full_name]
+          properties:
+            email:
+              type: string
+              format: email
+              maxLength: 254
+            password:
+              $ref: "#/components/schemas/Password"
+            full_name:
+              type: string
+              minLength: 1
+              maxLength: 255
+            phone:
+              $ref: "#/components/schemas/Phone"
+    TenantRegistration:
+      type: object
+      required: [tenant, headquarters, admin]
+      properties:
+        tenant:
+          $ref: "#/components/schemas/Tenant"
+        headquarters:
+          $ref: "#/components/schemas/Location"
+        admin:
+          $ref: "#/components/schemas/User"
     Position:
       type: object
       description: Device-reported WGS-84 position.
@@ -107,6 +1007,41 @@ components:
           type: number
           minimum: 0
   responses:
+    Session:
+      description: Signed in. The response must not be cached.
+      headers:
+        Cache-Control:
+          schema:
+            type: string
+            example: no-store
+        X-Trace-Id:
+          $ref: "#/components/headers/TraceId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Session"
+          example:
+            access_token: eyJhbGciOiJFZERTQSIsImtpZCI6IjIwMjYtMDkiLCJ0eXAiOiJKV1QifQ.eyJ0aWQiOiIwMTkyZjdhNC03YzNlLTdkMmEtOWIxZS0zZjRhNWI2YzdkOGUiLCJyb2xlIjoiQURNSU4iLCJzdWIiOiIwMTkyZjdhNC03YzNlLTdkMmEtOWIxZS0zZjRhNWI2YzdkOTAiLCJleHAiOjE3OTEwMjM1MDAsImlhdCI6MTc5MTAyMjYwMCwianRpIjoiMDE5MmY3YTQtN2MzZS03ZDJhLTliMWUtM2Y0YTViNmM3ZDkxIn0.signature
+            token_type: Bearer
+            expires_in: 900
+            refresh_token: 3Q2y9m0bq6Yx1S8QkqUe0Z0f2nY7fQyGmW3p5d4Jt0A
+            refresh_token_expires_in: 604800
+            user:
+              id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d90
+              email: admin@sgfresh.example
+              full_name: Nguyen Van An
+              phone: "+84 28 3822 1234"
+              role: ADMIN
+              is_active: true
+              last_login_at: "2026-09-30T08:10:00.123456Z"
+              created_at: "2026-09-30T08:00:00.123456Z"
+              updated_at: "2026-09-30T08:10:00.123456Z"
+              tenant:
+                id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d8e
+                code: SGFRESH
+                legal_name: Saigon Fresh Foods Joint Stock Company
+                gs1_company_prefix: "8930001"
+                status: ACTIVE
     BadRequest:
       description: The request is malformed or fails validation.
       headers:
@@ -117,10 +1052,17 @@ components:
           schema:
             $ref: "#/components/schemas/Problem"
     Unauthorized:
-      description: Missing, invalid, or expired credentials.
+      description: |
+        Missing, invalid, or expired credentials: `UNAUTHENTICATED`, `TOKEN_EXPIRED` (refresh and retry once),
+        `INVALID_CREDENTIALS`, or `REFRESH_TOKEN_INVALID`.
       headers:
         X-Trace-Id:
           $ref: "#/components/headers/TraceId"
+        WWW-Authenticate:
+          description: Bearer challenge (RFC 6750) on requests without a valid access token.
+          schema:
+            type: string
+            example: Bearer realm="veritrace", error="invalid_token", error_description="expired"
       content:
         application/problem+json:
           schema:
@@ -154,6 +1096,24 @@ components:
             $ref: "#/components/schemas/Problem"
     UnprocessableContent:
       description: The request is well-formed but violates a domain rule.
+      headers:
+        X-Trace-Id:
+          $ref: "#/components/headers/TraceId"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    PayloadTooLarge:
+      description: The request body exceeds 1 MiB.
+      headers:
+        X-Trace-Id:
+          $ref: "#/components/headers/TraceId"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    UnsupportedMediaType:
+      description: The request body is not `application/json`.
       headers:
         X-Trace-Id:
           $ref: "#/components/headers/TraceId"
