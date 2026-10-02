@@ -15,6 +15,7 @@ import (
 
 	"github.com/veritrace-platform/core-business-service/internal/event"
 	"github.com/veritrace-platform/core-business-service/internal/identity"
+	"github.com/veritrace-platform/core-business-service/internal/inventory"
 	"github.com/veritrace-platform/core-business-service/internal/policy"
 )
 
@@ -250,5 +251,104 @@ func (s *Service) ConfirmPickup(ctx context.Context, p identity.Principal, id uu
 	if err == nil && failure != nil {
 		return Shipment{}, failure
 	}
+	return sh, err
+}
+
+// Checkpoint is what the assigned driver submits at an intermediate facility.
+type Checkpoint struct {
+	SSCC string
+	// GLN names the facility, an active location of any tenant.
+	GLN      string
+	Position Position
+}
+
+// RecordCheckpoint records that the assigned driver passed a facility with the shipment
+// (shipment-lifecycle.md §6.2): the scanned SSCC must match and the position must be inside the facility's
+// geo-fence. The status stays IN_TRANSIT; shipment.checkpoint_recorded records the facility and the position.
+func (s *Service) RecordCheckpoint(ctx context.Context, p identity.Principal, id uuid.UUID, cp Checkpoint) (Shipment, error) {
+	var failure error
+	sh, err := s.command(ctx, p, id, func(repo Repository, sh Shipment) error {
+		var facility Facility
+		var distance float64
+		err := policy.Evaluate(policy.Request{
+			Action: policy.RecordCheckpoint, Role: p.Role, Parties: sh.parties(p.TenantID), ShipmentStatus: sh.Status,
+			AssignedDriver: sh.assignedTo(p.UserID),
+			Facts: known(map[policy.Check]func() (bool, error){
+				policy.SSCCMatch: ssccMatch(sh, cp.SSCC, &failure),
+				policy.FacilityGeofence: func() (bool, error) {
+					var err error
+					facility, _, err = repo.LookUpLocation(ctx, cp.GLN)
+					if errors.Is(err, errNotVisible) {
+						failure = invalidReference("gln", "is not an active location in the directory")
+						return false, nil
+					}
+					if err != nil {
+						return false, err
+					}
+					return geofence(facility, cp.Position, &distance, &failure)()
+				},
+			}),
+		})
+		if failure != nil {
+			return failure
+		}
+		if err != nil {
+			return err
+		}
+		return repo.AppendEvent(ctx, event.New{
+			ShipmentID: id, SSCC: sh.SSCC, Status: sh.Status, Type: event.TypeCheckpointRecorded, Actor: actor(p),
+			OccurredAt: s.now(),
+			Data: checkpointData{
+				Facility: facilityName{GLN: facility.GLN, Name: facility.Name}, Position: cp.Position, DistanceMeters: distance,
+			},
+		})
+	})
+	return sh, err
+}
+
+// Delivery is what the consignee submits when the shipment arrives.
+type Delivery struct {
+	SSCC     string
+	Position Position
+}
+
+// ConfirmDelivery records the consignee's receipt at the destination (shipment-lifecycle.md §6.3): the scanned
+// SSCC must match and the position must be inside the destination geo-fence. The shipment is DELIVERED, the
+// quantity lands on the consignee's balance at the destination, and shipment.delivery_confirmed records the
+// position. The consignee then holds the lot.
+func (s *Service) ConfirmDelivery(ctx context.Context, p identity.Principal, id uuid.UUID, d Delivery) (Shipment, error) {
+	var failure error
+	sh, err := s.command(ctx, p, id, func(repo Repository, sh Shipment) error {
+		var distance float64
+		err := policy.Evaluate(policy.Request{
+			Action: policy.ConfirmDelivery, Role: p.Role, Parties: sh.parties(p.TenantID), ShipmentStatus: sh.Status,
+			Facts: known(map[policy.Check]func() (bool, error){
+				policy.SSCCMatch:           ssccMatch(sh, d.SSCC, &failure),
+				policy.DestinationGeofence: geofence(sh.Destination, d.Position, &distance, &failure),
+			}),
+		})
+		if failure != nil {
+			return failure
+		}
+		if err != nil {
+			return err
+		}
+		now := s.now().UTC()
+		if err := repo.SetDelivered(ctx, id, now); err != nil {
+			return err
+		}
+		err = repo.ApplyMovement(ctx, inventory.Movement{
+			TenantID: p.TenantID, LocationID: sh.Destination.LocationID, LotID: sh.Lot.ID, Delta: sh.Quantity,
+			Reason: inventory.ReasonShipmentDelivered, ShipmentID: &id, CreatedBy: p.UserID,
+		})
+		if err != nil {
+			return err
+		}
+		return repo.AppendEvent(ctx, event.New{
+			ShipmentID: id, SSCC: sh.SSCC, Status: policy.ShipmentDelivered, Type: event.TypeDeliveryConfirmed,
+			Actor: actor(p), OccurredAt: now,
+			Data: deliveryData{ReceiverUserID: p.UserID, Position: d.Position, DistanceMeters: distance},
+		})
+	})
 	return sh, err
 }

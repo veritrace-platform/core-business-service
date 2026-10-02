@@ -27,15 +27,17 @@ var caller = identity.Principal{UserID: uuid.New(), TenantID: uuid.New(), Role: 
 
 // fakeShipments records the calls of the handler and returns canned results.
 type fakeShipments struct {
-	err       error
-	listed    []shipment.Shipment
-	events    []event.Event
-	gotNew    shipment.NewShipment
-	gotFilter shipment.Filter
-	gotPage   event.Page
-	gotID     uuid.UUID
-	gotArg    string
-	gotPickup shipment.Pickup
+	err           error
+	listed        []shipment.Shipment
+	events        []event.Event
+	gotNew        shipment.NewShipment
+	gotFilter     shipment.Filter
+	gotPage       event.Page
+	gotID         uuid.UUID
+	gotArg        string
+	gotPickup     shipment.Pickup
+	gotCheckpoint shipment.Checkpoint
+	gotDelivery   shipment.Delivery
 }
 
 func (f *fakeShipments) Create(_ context.Context, _ identity.Principal, ns shipment.NewShipment) (shipment.Shipment, error) {
@@ -80,6 +82,16 @@ func (f *fakeShipments) IssuePickupCode(_ context.Context, _ identity.Principal,
 func (f *fakeShipments) ConfirmPickup(_ context.Context, _ identity.Principal, id uuid.UUID, pickup shipment.Pickup) (shipment.Shipment, error) {
 	f.gotID, f.gotPickup = id, pickup
 	return shipment.Shipment{ID: id, Status: policy.ShipmentInTransit}, f.err
+}
+
+func (f *fakeShipments) RecordCheckpoint(_ context.Context, _ identity.Principal, id uuid.UUID, cp shipment.Checkpoint) (shipment.Shipment, error) {
+	f.gotID, f.gotCheckpoint = id, cp
+	return shipment.Shipment{ID: id, Status: policy.ShipmentInTransit}, f.err
+}
+
+func (f *fakeShipments) ConfirmDelivery(_ context.Context, _ identity.Principal, id uuid.UUID, d shipment.Delivery) (shipment.Shipment, error) {
+	f.gotID, f.gotDelivery = id, d
+	return shipment.Shipment{ID: id, Status: policy.ShipmentDelivered}, f.err
 }
 
 func (f *fakeShipments) Events(_ context.Context, _ identity.Principal, id uuid.UUID, page event.Page) ([]event.Event, error) {
@@ -384,5 +396,48 @@ func TestHandoverProblems(t *testing.T) {
 		http.MethodPost, "/api/v1/shipments/"+uuid.New().String()+"/pickup-code", "")
 	if p := problem(t, rec); rec.Code != http.StatusConflict || p.Code != "INVALID_STATE_TRANSITION" {
 		t.Errorf("code without a driver: status = %d, problem = %+v", rec.Code, p)
+	}
+}
+
+func TestCheckpointAndDeliveryEndpoints(t *testing.T) {
+	id := uuid.New()
+	position := `"position":{"latitude":10.8,"longitude":106.65,"accuracy_meters":8}`
+	fake := &fakeShipments{}
+	if rec := call(t, fake, http.MethodPost, "/api/v1/shipments/"+id.String()+"/checkpoints",
+		`{"sscc":"`+sscc+`","gln":" 8934567000017 ",`+position+`}`); rec.Code != http.StatusOK {
+		t.Fatalf("checkpoint: status = %d, body %s", rec.Code, rec.Body)
+	}
+	if cp := fake.gotCheckpoint; cp.SSCC != sscc || cp.GLN != "8934567000017" || cp.Position.AccuracyMeters != 8 {
+		t.Errorf("checkpoint = %+v", cp)
+	}
+	if rec := call(t, fake, http.MethodPost, "/api/v1/shipments/"+id.String()+"/delivery", `{"sscc":"`+sscc+`",`+position+`}`); rec.Code != http.StatusOK ||
+		!strings.Contains(rec.Body.String(), `"status":"DELIVERED"`) {
+		t.Fatalf("delivery: status = %d, body %s", rec.Code, rec.Body)
+	}
+	if d := fake.gotDelivery; d.SSCC != sscc || d.Position.Latitude != 10.8 {
+		t.Errorf("delivery = %+v", d)
+	}
+
+	tests := []struct {
+		path, body, field, code string
+		status                  int
+	}{
+		{"/checkpoints", `{"sscc":"` + sscc + `",` + position + `}`, "gln", httpx.FieldRequired, http.StatusBadRequest},
+		{"/checkpoints", `{"sscc":"` + sscc + `","gln":"8934567000018",` + position + `}`, "gln", string(gs1.ReasonCheckDigit), http.StatusUnprocessableEntity},
+		{"/delivery", `{` + position + `}`, "sscc", httpx.FieldRequired, http.StatusBadRequest},
+		{"/delivery", `{"sscc":"` + sscc + `","position":{"latitude":10.8,"longitude":200,"accuracy_meters":8}}`, "position.longitude", httpx.FieldOutOfRange, http.StatusBadRequest},
+		{"/delivery", `{"sscc":"` + sscc + `",` + position + `,"code":"042917"}`, "code", httpx.FieldUnknown, http.StatusBadRequest},
+	}
+	for _, tt := range tests {
+		rec := call(t, &fakeShipments{}, http.MethodPost, "/api/v1/shipments/"+id.String()+tt.path, tt.body)
+		p := problem(t, rec)
+		if rec.Code != tt.status || len(p.Errors) != 1 || p.Errors[0].Field != tt.field || p.Errors[0].Code != tt.code {
+			t.Errorf("%s %s: status = %d, errors = %+v; want %d with %s on %s", tt.path, tt.body, rec.Code, p.Errors, tt.status, tt.code, tt.field)
+		}
+	}
+	rec := call(t, &fakeShipments{err: &shipment.OutsideGeofenceError{DistanceMeters: 400, AllowedMeters: 250}}, http.MethodPost,
+		"/api/v1/shipments/"+id.String()+"/delivery", `{"sscc":"`+sscc+`",`+position+`}`)
+	if p := problem(t, rec); rec.Code != http.StatusUnprocessableEntity || p.Code != "OUTSIDE_GEOFENCE" {
+		t.Errorf("outside the destination: status = %d, problem = %+v", rec.Code, p)
 	}
 }

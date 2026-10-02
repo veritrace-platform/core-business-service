@@ -31,6 +31,8 @@ type Shipments interface {
 	Cancel(ctx context.Context, p identity.Principal, id uuid.UUID, reason string) (Shipment, error)
 	IssuePickupCode(ctx context.Context, p identity.Principal, id uuid.UUID) (IssuedCode, error)
 	ConfirmPickup(ctx context.Context, p identity.Principal, id uuid.UUID, pickup Pickup) (Shipment, error)
+	RecordCheckpoint(ctx context.Context, p identity.Principal, id uuid.UUID, cp Checkpoint) (Shipment, error)
+	ConfirmDelivery(ctx context.Context, p identity.Principal, id uuid.UUID, d Delivery) (Shipment, error)
 	Events(ctx context.Context, p identity.Principal, id uuid.UUID, page event.Page) ([]event.Event, error)
 	Integrity(ctx context.Context, p identity.Principal, id uuid.UUID) (event.Integrity, error)
 }
@@ -60,6 +62,8 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Post("/shipments/{shipment_id}/cancel", h.cancel)
 		r.Post("/shipments/{shipment_id}/pickup-code", h.issuePickupCode)
 		r.Post("/shipments/{shipment_id}/pickup", h.confirmPickup)
+		r.Post("/shipments/{shipment_id}/checkpoints", h.recordCheckpoint)
+		r.Post("/shipments/{shipment_id}/delivery", h.confirmDelivery)
 		r.Get("/shipments/{shipment_id}/events", h.events)
 		r.Get("/shipments/{shipment_id}/integrity", h.integrity)
 	})
@@ -284,6 +288,38 @@ func (h *Handler) confirmPickup(w http.ResponseWriter, r *http.Request) {
 	}
 	s, err := h.shipments.ConfirmPickup(r.Context(), p, id, pickup)
 	h.respond(w, r, s, err, "pickup confirmed")
+}
+
+func (h *Handler) recordCheckpoint(w http.ResponseWriter, r *http.Request) {
+	var req checkpointRequest
+	p, id, ok := decodeCommand(w, r, &req)
+	if !ok {
+		return
+	}
+	var v rest.Validator
+	cp := req.validate(&v)
+	if problem := v.Problem(); problem != nil {
+		httpx.WriteProblem(w, r, *problem)
+		return
+	}
+	s, err := h.shipments.RecordCheckpoint(r.Context(), p, id, cp)
+	h.respond(w, r, s, err, "checkpoint recorded")
+}
+
+func (h *Handler) confirmDelivery(w http.ResponseWriter, r *http.Request) {
+	var req deliveryRequest
+	p, id, ok := decodeCommand(w, r, &req)
+	if !ok {
+		return
+	}
+	var v rest.Validator
+	d := req.validate(&v)
+	if problem := v.Problem(); problem != nil {
+		httpx.WriteProblem(w, r, *problem)
+		return
+	}
+	s, err := h.shipments.ConfirmDelivery(r.Context(), p, id, d)
+	h.respond(w, r, s, err, "delivery confirmed")
 }
 
 func (h *Handler) events(w http.ResponseWriter, r *http.Request) {

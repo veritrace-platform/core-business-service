@@ -157,3 +157,24 @@ func (req *pickupRequest) validate(v *rest.Validator) Pickup {
 	pickup.Position = readPosition(v, req.Position)
 	return pickup
 }
+
+// checkpointRequest is the body of POST /api/v1/shipments/{shipment_id}/checkpoints.
+type checkpointRequest struct {
+	SSCC     string           `json:"sscc"`
+	GLN      string           `json:"gln"`
+	Position *positionRequest `json:"position"`
+}
+
+func (req *checkpointRequest) validate(v *rest.Validator) Checkpoint {
+	return Checkpoint{SSCC: scannedSSCC(v, req.SSCC), GLN: gln(v, "gln", req.GLN), Position: readPosition(v, req.Position)}
+}
+
+// deliveryRequest is the body of POST /api/v1/shipments/{shipment_id}/delivery.
+type deliveryRequest struct {
+	SSCC     string           `json:"sscc"`
+	Position *positionRequest `json:"position"`
+}
+
+func (req *deliveryRequest) validate(v *rest.Validator) Delivery {
+	return Delivery{SSCC: scannedSSCC(v, req.SSCC), Position: readPosition(v, req.Position)}
+}

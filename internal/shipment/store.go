@@ -321,6 +321,13 @@ func (r repository) SetPickedUp(ctx context.Context, id uuid.UUID, at time.Time)
 	return nil
 }
 
+func (r repository) SetDelivered(ctx context.Context, id uuid.UUID, at time.Time) error {
+	if err := r.q.SetDelivered(ctx, queries.SetDeliveredParams{ID: id, DeliveredAt: &at}); err != nil {
+		return fmt.Errorf("mark shipment delivered: %w", err)
+	}
+	return nil
+}
+
 func (r repository) InvalidatePickupCodes(ctx context.Context, id uuid.UUID, at time.Time) error {
 	err := r.q.InvalidatePickupCodes(ctx, queries.InvalidatePickupCodesParams{ShipmentID: id, InvalidatedAt: &at})
 	if err != nil {

@@ -68,3 +68,20 @@ type pickupData struct {
 	Position       Position  `json:"position"`
 	DistanceMeters float64   `json:"distance_meters"`
 }
+
+type facilityName struct {
+	GLN  string `json:"gln"`
+	Name string `json:"name"`
+}
+
+type checkpointData struct {
+	Facility       facilityName `json:"facility"`
+	Position       Position     `json:"position"`
+	DistanceMeters float64      `json:"distance_meters"`
+}
+
+type deliveryData struct {
+	ReceiverUserID uuid.UUID `json:"receiver_user_id"`
+	Position       Position  `json:"position"`
+	DistanceMeters float64   `json:"distance_meters"`
+}

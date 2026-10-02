@@ -1397,6 +1397,86 @@ paths:
           $ref: "#/components/responses/Locked"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/shipments/{shipment_id}/checkpoints:
+    parameters:
+      - $ref: "#/components/parameters/ShipmentID"
+    post:
+      operationId: recordCheckpoint
+      tags: [Shipments]
+      summary: Record a checkpoint
+      description: |
+        The assigned `DRIVER`, while the shipment is `IN_TRANSIT`, at an intermediate facility named by its GLN: an
+        active location of any tenant, or `400` with `INVALID_VALUE` on `gln`. The scanned SSCC must be the
+        shipment's (`422 SSCC_MISMATCH`) and the position inside the facility's geo-fence
+        (`422 OUTSIDE_GEOFENCE`). The status stays `IN_TRANSIT`; `shipment.checkpoint_recorded` records the facility
+        and the position.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CheckpointRecord"
+      responses:
+        "200":
+          $ref: "#/components/responses/UpdatedShipment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/shipments/{shipment_id}/delivery:
+    parameters:
+      - $ref: "#/components/parameters/ShipmentID"
+    post:
+      operationId: confirmDelivery
+      tags: [Shipments]
+      summary: Confirm delivery
+      description: |
+        `ADMIN` and `WAREHOUSE_MANAGER` of the consignee, while the shipment is `IN_TRANSIT`. The scanned SSCC must
+        be the shipment's (`422 SSCC_MISMATCH`) and the position inside the destination geo-fence
+        (`422 OUTSIDE_GEOFENCE`). The shipment is `DELIVERED`, the quantity lands on the consignee's balance at the
+        destination, which makes the consignee a holder of the lot, and `shipment.delivery_confirmed` records the
+        position.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliveryConfirmation"
+      responses:
+        "200":
+          $ref: "#/components/responses/UpdatedShipment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/shipments/{shipment_id}/events:
     parameters:
       - $ref: "#/components/parameters/ShipmentID"
@@ -2067,6 +2147,32 @@ components:
         next_cursor:
           type: [string, "null"]
           description: Pass as `cursor` to read the next page; `null` on the last page.
+    CheckpointRecord:
+      type: object
+      additionalProperties: false
+      required: [sscc, gln, position]
+      properties:
+        sscc:
+          type: string
+          description: The SSCC scanned from the pallet label.
+          pattern: "^[0-9]{18}$"
+        gln:
+          type: string
+          description: The facility, scanned or typed; the directory resolves it.
+          pattern: "^[0-9]{13}$"
+        position:
+          $ref: "#/components/schemas/Position"
+    DeliveryConfirmation:
+      type: object
+      additionalProperties: false
+      required: [sscc, position]
+      properties:
+        sscc:
+          type: string
+          description: The SSCC scanned from the pallet label.
+          pattern: "^[0-9]{18}$"
+        position:
+          $ref: "#/components/schemas/Position"
     ShipmentStatus:
       type: string
       description: See docs/domain/shipment-lifecycle.md §3.

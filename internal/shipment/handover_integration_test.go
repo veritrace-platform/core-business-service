@@ -203,3 +203,105 @@ func TestPickupCodeAttemptsAndExpiry(t *testing.T) {
 		t.Errorf("code of the previous driver: error = %v, want EXPIRED", err)
 	}
 }
+
+// inTransit returns a shipment that the carrier's driver has picked up.
+func (w world) inTransit(t *testing.T) shipment.Shipment {
+	t.Helper()
+	sh := w.readyForPickup(t)
+	issued := w.issue(t, sh.ID)
+	picked, err := w.svc.ConfirmPickup(t.Context(), w.carrierDriver, sh.ID, shipment.Pickup{SSCC: sh.SSCC, Code: issued.Code, Position: atTheDock})
+	if err != nil {
+		t.Fatalf("pickup: %v", err)
+	}
+	return picked
+}
+
+func TestCheckpoints(t *testing.T) {
+	w := newWorld(t)
+	sh := w.inTransit(t)
+	hub := w.db.CreateLocation(t, w.stranger) // a facility of any tenant
+	checkpoint := shipment.Checkpoint{SSCC: sh.SSCC, GLN: hub.GLN, Position: atTheDock}
+
+	recorded, err := w.svc.RecordCheckpoint(t.Context(), w.carrierDriver, sh.ID, checkpoint)
+	if err != nil || recorded.Status != policy.ShipmentInTransit {
+		t.Fatalf("RecordCheckpoint() = %+v, %v", recorded, err)
+	}
+	events := w.events(t, w.ownerManager, sh.ID)
+	last := events[len(events)-1]
+	var data struct {
+		Facility struct{ GLN, Name string }
+		Position shipment.Position
+	}
+	if err := json.Unmarshal(last.Data, &data); err != nil || last.Type != event.TypeCheckpointRecorded || data.Facility.GLN != hub.GLN ||
+		data.Facility.Name != "Fixture Warehouse" || data.Position != atTheDock {
+		t.Errorf("checkpoint event = %+v %s", last, last.Data)
+	}
+
+	unknown := checkpoint
+	unknown.GLN = "4006381333931"
+	if _, err := w.svc.RecordCheckpoint(t.Context(), w.carrierDriver, sh.ID, unknown); !reference(err, "gln") {
+		t.Errorf("unknown facility: error = %v, want an invalid gln", err)
+	}
+	away := checkpoint
+	away.Position = farAway
+	var outside *shipment.OutsideGeofenceError
+	if _, err := w.svc.RecordCheckpoint(t.Context(), w.carrierDriver, sh.ID, away); !errors.As(err, &outside) {
+		t.Errorf("away from the facility: error = %v", err)
+	}
+	if _, err := w.svc.RecordCheckpoint(t.Context(), w.carrierManager, sh.ID, checkpoint); !denied(err, policy.ReasonRole) {
+		t.Errorf("carrier manager: error = %v, want a role denial", err)
+	}
+	created, err := w.svc.Create(t.Context(), w.ownerManager, w.request(10))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.svc.RecordCheckpoint(t.Context(), w.carrierDriver, created.ID, checkpoint); !denied(err, policy.ReasonInvalidState) {
+		t.Errorf("before pickup: error = %v, want an invalid state", err)
+	}
+}
+
+func TestConfirmDelivery(t *testing.T) {
+	w := newWorld(t)
+	sh := w.inTransit(t)
+	receiver := as(w.db.CreateUser(t, w.consignee.ID, identity.RoleWarehouseManager))
+	delivery := shipment.Delivery{SSCC: sh.SSCC, Position: atTheDock}
+
+	if _, err := w.svc.ConfirmDelivery(t.Context(), w.ownerManager, sh.ID, delivery); !denied(err, policy.ReasonParty) {
+		t.Errorf("owner confirming: error = %v, want a party denial", err)
+	}
+	away := delivery
+	away.Position = farAway
+	var outside *shipment.OutsideGeofenceError
+	if _, err := w.svc.ConfirmDelivery(t.Context(), receiver, sh.ID, away); !errors.As(err, &outside) {
+		t.Errorf("away from the destination: error = %v", err)
+	}
+	wrong := delivery
+	wrong.SSCC = "089300010000000018"
+	if _, err := w.svc.ConfirmDelivery(t.Context(), receiver, sh.ID, wrong); !errors.Is(err, shipment.ErrSSCCMismatch) {
+		t.Errorf("wrong pallet: error = %v, want ErrSSCCMismatch", err)
+	}
+
+	delivered, err := w.svc.ConfirmDelivery(t.Context(), receiver, sh.ID, delivery)
+	if err != nil || delivered.Status != policy.ShipmentDelivered || delivered.DeliveredAt == nil {
+		t.Fatalf("ConfirmDelivery() = %+v, %v", delivered, err)
+	}
+	// The quantity lands on the consignee's balance at the destination, so it now holds the lot.
+	if got := w.balance(t, w.store); got != 100 {
+		t.Errorf("destination balance = %d, want 100", got)
+	}
+	var tenantID uuid.UUID
+	if err := w.db.Owner.QueryRow(t.Context(), `SELECT tenant_id FROM core.inventory_movements WHERE shipment_id = $1 AND reason = 'SHIPMENT_DELIVERED'`,
+		sh.ID).Scan(&tenantID); err != nil || tenantID != w.consignee.ID {
+		t.Errorf("delivery movement tenant = %s, %v; want the consignee", tenantID, err)
+	}
+	events := w.events(t, receiver, sh.ID)
+	if last := events[len(events)-1]; last.Type != event.TypeDeliveryConfirmed || last.Subject.Status != policy.ShipmentDelivered {
+		t.Errorf("last event = %+v", last)
+	}
+	if result, err := w.svc.Integrity(t.Context(), w.carrierDriver, sh.ID); err != nil || !result.Valid || result.EventCount != len(events) {
+		t.Errorf("Integrity() = %+v, %v", result, err)
+	}
+	if _, err := w.svc.ConfirmDelivery(t.Context(), receiver, sh.ID, delivery); !denied(err, policy.ReasonInvalidState) {
+		t.Errorf("second delivery: error = %v, want an invalid state", err)
+	}
+}

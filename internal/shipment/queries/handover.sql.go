@@ -122,6 +122,23 @@ func (q *Queries) RecordFailedAttempt(ctx context.Context, id uuid.UUID) (int16,
 	return failed_attempts, err
 }
 
+const setDelivered = `-- name: SetDelivered :exec
+UPDATE core.shipments
+SET status = 'DELIVERED',
+    delivered_at = $1
+WHERE id = $2
+`
+
+type SetDeliveredParams struct {
+	DeliveredAt *time.Time
+	ID          uuid.UUID
+}
+
+func (q *Queries) SetDelivered(ctx context.Context, arg SetDeliveredParams) error {
+	_, err := q.db.Exec(ctx, setDelivered, arg.DeliveredAt, arg.ID)
+	return err
+}
+
 const setPickedUp = `-- name: SetPickedUp :exec
 UPDATE core.shipments
 SET status = 'IN_TRANSIT',

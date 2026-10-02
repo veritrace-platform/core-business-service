@@ -863,7 +863,7 @@ func TestShipmentCommandsAndReads(t *testing.T) {
 	}
 }
 
-func TestPickupHandover(t *testing.T) {
+func TestCustodyHandover(t *testing.T) {
 	a := startAPI(t)
 	w := newShipmentWorld(a)
 	created, resp := a.createShipment(w, 100)
@@ -898,6 +898,41 @@ func TestPickupHandover(t *testing.T) {
 	var picked shipmentBody
 	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/shipments/" + created.ID + "/pickup", token: w.driverSession.AccessToken, body: pickup},
 		&picked); resp.status != http.StatusOK || picked.Status != "IN_TRANSIT" {
-		t.Errorf("pickup: status = %d, shipment = %+v", resp.status, picked)
+		t.Fatalf("pickup: status = %d, shipment = %+v", resp.status, picked)
+	}
+
+	// The driver passes a hub of another tenant, and the consignee receives the pallet at its store.
+	hub := a.db.CreateLocation(t, a.db.CreateTenant(t))
+	position := map[string]any{"latitude": 10.8, "longitude": 106.65, "accuracy_meters": 15}
+	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/shipments/" + created.ID + "/checkpoints", token: w.driverSession.AccessToken,
+		body: map[string]any{"sscc": created.SSCC, "gln": hub.GLN, "position": position}}, nil); resp.status != http.StatusOK {
+		t.Errorf("checkpoint: status = %d", resp.status)
+	}
+	var delivered shipmentBody
+	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/shipments/" + created.ID + "/delivery", token: w.consigneeSession.AccessToken,
+		body: map[string]any{"sscc": created.SSCC, "position": position}}, &delivered); resp.status != http.StatusOK || delivered.Status != "DELIVERED" {
+		t.Fatalf("delivery: status = %d, shipment = %+v", resp.status, delivered)
+	}
+
+	// The consignee now holds the lot: it reads the lot and its own stock, and the log of five events is intact.
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/lots/" + w.lot.ID.String(), token: w.consigneeSession.AccessToken}, nil); resp.status != http.StatusOK {
+		t.Errorf("consignee reading the lot: status = %d", resp.status)
+	}
+	var stock struct {
+		Items []struct {
+			QuantityOnHand int `json:"quantity_on_hand"`
+		} `json:"items"`
+	}
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/inventory?lot_id=" + w.lot.ID.String(), token: w.consigneeSession.AccessToken}, &stock); resp.status != http.StatusOK ||
+		len(stock.Items) != 1 || stock.Items[0].QuantityOnHand != 100 {
+		t.Errorf("consignee stock: status = %d, page = %+v", resp.status, stock)
+	}
+	var integrity struct {
+		Valid      bool `json:"valid"`
+		EventCount int  `json:"event_count"`
+	}
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/shipments/" + created.ID + "/integrity", token: w.ownerSession.AccessToken}, &integrity); resp.status != http.StatusOK ||
+		!integrity.Valid || integrity.EventCount != 5 {
+		t.Errorf("integrity: status = %d, result = %+v", resp.status, integrity)
 	}
 }

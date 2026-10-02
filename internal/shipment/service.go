@@ -54,6 +54,7 @@ type Repository interface {
 	SetDriver(ctx context.Context, id, driverID uuid.UUID) error
 	SetCancelled(ctx context.Context, id uuid.UUID, at time.Time) error
 	SetPickedUp(ctx context.Context, id uuid.UUID, at time.Time) error
+	SetDelivered(ctx context.Context, id uuid.UUID, at time.Time) error
 	// InvalidatePickupCodes ends the shipment's active pickup code, if any.
 	InvalidatePickupCodes(ctx context.Context, id uuid.UUID, at time.Time) error
 	InsertPickupCode(ctx context.Context, id uuid.UUID, hash []byte, expiresAt time.Time, issuedBy uuid.UUID, at time.Time) error

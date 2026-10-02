@@ -43,3 +43,9 @@ UPDATE core.shipments
 SET status = 'IN_TRANSIT',
     picked_up_at = sqlc.arg(picked_up_at)
 WHERE id = sqlc.arg(id);
+
+-- name: SetDelivered :exec
+UPDATE core.shipments
+SET status = 'DELIVERED',
+    delivered_at = sqlc.arg(delivered_at)
+WHERE id = sqlc.arg(id);
