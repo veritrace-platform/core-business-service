@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/veritrace-platform/core-business-service/internal/inventory/queries"
@@ -15,10 +16,24 @@ import (
 // ErrInsufficientStock; as with any failed statement, the transaction must then end.
 func ApplyMovement(ctx context.Context, tx queries.DBTX, m Movement) (int, error) {
 	q := queries.New(tx)
-	balance, err := q.AddToBalance(ctx, queries.AddToBalanceParams{
-		TenantID: m.TenantID, LocationID: m.LocationID, LotID: m.LotID,
-		QuantityDelta: int32(m.Delta), //nolint:gosec // quantities are validated to fit an integer column
-	})
+	var balance int32
+	var err error
+	switch quantity := int32(abs(m.Delta)); { //nolint:gosec // quantities are validated to fit an integer column
+	case m.Delta > 0:
+		balance, err = q.AddToBalance(ctx, queries.AddToBalanceParams{
+			TenantID: m.TenantID, LocationID: m.LocationID, LotID: m.LotID, Quantity: quantity,
+		})
+	case m.Delta < 0:
+		balance, err = q.TakeFromBalance(ctx, queries.TakeFromBalanceParams{
+			LocationID: m.LocationID, LotID: m.LotID, Quantity: quantity,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			// No balance at the location is no stock.
+			return 0, ErrInsufficientStock
+		}
+	default:
+		return 0, errors.New("a movement must change the balance")
+	}
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23514" && pgErr.ConstraintName == "inventory_balances_quantity_on_hand_check" {
 		return 0, ErrInsufficientStock
@@ -35,4 +50,11 @@ func ApplyMovement(ctx context.Context, tx queries.DBTX, m Movement) (int, error
 		return 0, fmt.Errorf("record movement: %w", err)
 	}
 	return int(balance), nil
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
 }

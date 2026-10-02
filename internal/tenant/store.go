@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -64,6 +65,14 @@ func (r profileRepository) Update(ctx context.Context, id uuid.UUID, p ProfilePa
 		return Tenant{}, fmt.Errorf("update tenant: %w", err)
 	}
 	return tenantFromRow(queries.GetTenantRow(row)), nil
+}
+
+func (r profileRepository) ExtensionDigitUsed(ctx context.Context, id uuid.UUID, digit int) (bool, error) {
+	used, err := r.q.ExtensionDigitUsed(ctx, queries.ExtensionDigitUsedParams{TenantID: id, Digit: strconv.Itoa(digit)})
+	if err != nil {
+		return false, fmt.Errorf("check SSCC extension digit: %w", err)
+	}
+	return used, nil
 }
 
 func tenantFromRow(row queries.GetTenantRow) Tenant {

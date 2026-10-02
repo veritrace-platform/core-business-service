@@ -12,6 +12,27 @@ import (
 	"github.com/google/uuid"
 )
 
+const extensionDigitUsed = `-- name: ExtensionDigitUsed :one
+SELECT EXISTS (
+    SELECT 1
+    FROM core.shipments
+    WHERE owner_tenant_id = $1
+      AND left(sscc, 1) = $2::text
+)
+`
+
+type ExtensionDigitUsedParams struct {
+	TenantID uuid.UUID
+	Digit    string
+}
+
+func (q *Queries) ExtensionDigitUsed(ctx context.Context, arg ExtensionDigitUsedParams) (bool, error) {
+	row := q.db.QueryRow(ctx, extensionDigitUsed, arg.TenantID, arg.Digit)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const getTenant = `-- name: GetTenant :one
 SELECT
     id,
@@ -140,6 +161,10 @@ func (q *Queries) RegisterTenant(ctx context.Context, arg RegisterTenantParams) 
 const updateTenant = `-- name: UpdateTenant :one
 UPDATE core.tenants
 SET legal_name = coalesce($1, legal_name),
+    sscc_next_serial = CASE
+        WHEN $2::smallint <> sscc_extension_digit THEN 1
+        ELSE sscc_next_serial
+    END,
     sscc_extension_digit = coalesce($2, sscc_extension_digit)
 WHERE id = $3
 RETURNING
@@ -172,6 +197,7 @@ type UpdateTenantRow struct {
 	UpdatedAt          time.Time
 }
 
+// A new extension digit starts a new SSCC serial space (gs1-identifiers.md §3).
 func (q *Queries) UpdateTenant(ctx context.Context, arg UpdateTenantParams) (UpdateTenantRow, error) {
 	row := q.db.QueryRow(ctx, updateTenant, arg.LegalName, arg.SsccExtensionDigit, arg.ID)
 	var i UpdateTenantRow

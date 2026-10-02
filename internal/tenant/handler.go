@@ -219,6 +219,11 @@ func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) profileFailed(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
+	case errors.Is(err, ErrExtensionDigitUsed):
+		httpx.WriteProblem(w, r, httpx.ValidationProblem([]httpx.FieldError{{
+			Field: "sscc_extension_digit", Code: httpx.FieldInvalidValue,
+			Message: "has issued SSCCs before; choose a digit that has not",
+		}}))
 	case rest.Denied(w, r, err):
 	case errors.Is(err, ErrNotFound):
 		httpx.NotFound(w, r)

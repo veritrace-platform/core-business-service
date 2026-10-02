@@ -105,10 +105,16 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 
 	readiness := admin.NewReadiness(map[string]admin.Check{"postgres": pool.Ping}, 2*time.Second)
 
-	api, err := app.NewHandler(appCfg, app.Dependencies{Logger: logger, Registerer: registry, Pool: pool})
+	deps := app.Dependencies{Logger: logger, Registerer: registry, Pool: pool}
+	api, err := app.NewHandler(appCfg, deps)
 	if err != nil {
 		return err
 	}
+	relay, closeRelay, err := app.NewRelay(appCfg, deps)
+	if err != nil {
+		return err
+	}
+	defer closeRelay()
 
 	apiServer := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -126,9 +132,20 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
 	}
 
+	// Events left in the outbox at shutdown are published at the next start.
+	relayCtx, stopRelay := context.WithCancel(ctx)
+	relayDone := make(chan struct{})
+	go func() {
+		defer close(relayDone)
+		relay.Run(relayCtx)
+	}()
+
 	logger.InfoContext(ctx, "starting", slog.String("env", cfg.Env))
-	if err := server.Run(ctx, logger, cfg.ShutdownTimeout, readiness.SetDraining, apiServer, adminServer); err != nil {
-		return err
+	runErr := server.Run(ctx, logger, cfg.ShutdownTimeout, readiness.SetDraining, apiServer, adminServer)
+	stopRelay()
+	<-relayDone
+	if runErr != nil {
+		return runErr
 	}
 	logger.InfoContext(ctx, "stopped")
 	return nil

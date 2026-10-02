@@ -32,18 +32,19 @@ RETURNING quantity_on_hand
 `
 
 type AddToBalanceParams struct {
-	TenantID      uuid.UUID
-	LocationID    uuid.UUID
-	LotID         uuid.UUID
-	QuantityDelta int32
+	TenantID   uuid.UUID
+	LocationID uuid.UUID
+	LotID      uuid.UUID
+	Quantity   int32
 }
 
+// PostgreSQL checks the proposed row before it looks for a conflict, so only positive quantities take this path.
 func (q *Queries) AddToBalance(ctx context.Context, arg AddToBalanceParams) (int32, error) {
 	row := q.db.QueryRow(ctx, addToBalance,
 		arg.TenantID,
 		arg.LocationID,
 		arg.LotID,
-		arg.QuantityDelta,
+		arg.Quantity,
 	)
 	var quantity_on_hand int32
 	err := row.Scan(&quantity_on_hand)
@@ -180,4 +181,25 @@ func (q *Queries) RecordMovement(ctx context.Context, arg RecordMovementParams) 
 		arg.CreatedBy,
 	)
 	return err
+}
+
+const takeFromBalance = `-- name: TakeFromBalance :one
+UPDATE core.inventory_balances
+SET quantity_on_hand = quantity_on_hand - $1
+WHERE location_id = $2
+  AND lot_id = $3
+RETURNING quantity_on_hand
+`
+
+type TakeFromBalanceParams struct {
+	Quantity   int32
+	LocationID uuid.UUID
+	LotID      uuid.UUID
+}
+
+func (q *Queries) TakeFromBalance(ctx context.Context, arg TakeFromBalanceParams) (int32, error) {
+	row := q.db.QueryRow(ctx, takeFromBalance, arg.Quantity, arg.LocationID, arg.LotID)
+	var quantity_on_hand int32
+	err := row.Scan(&quantity_on_hand)
+	return quantity_on_hand, err
 }
