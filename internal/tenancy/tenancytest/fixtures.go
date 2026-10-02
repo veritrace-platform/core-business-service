@@ -216,3 +216,63 @@ func (d *Database) AddBalance(t testing.TB, holder Tenant, location Location, lo
 		t.Fatalf("add fixture balance: %v", err)
 	}
 }
+
+// Shipment is a fixture shipment.
+type Shipment struct {
+	ID   uuid.UUID
+	SSCC string
+}
+
+// ShipmentSpec describes a fixture shipment: Quantity units of Lot from the owner's Origin to the consignee's
+// Destination, carried by Carrier (the owner, for an in-house fleet).
+type ShipmentSpec struct {
+	Owner, Carrier, Consignee Tenant
+	Lot                       Lot
+	Origin, Destination       Location
+	Quantity                  int
+}
+
+// CreateShipment inserts a CREATED shipment with its participants and snapshots. It records no event and moves
+// no stock; tests that need them run the shipment service. Fixture SSCCs use extension digit 9, so they never
+// collide with the SSCCs that the service issues.
+func (d *Database) CreateShipment(t testing.TB, spec ShipmentSpec) Shipment {
+	t.Helper()
+	payload := "9" + spec.Owner.GCP + fmt.Sprintf("%0*d", 16-len(spec.Owner.GCP), fixtureSeq.Add(1))
+	s := Shipment{SSCC: payload + strconv.Itoa(gs1.CheckDigit(payload))}
+	err := pgx.BeginFunc(t.Context(), d.Owner, func(tx pgx.Tx) error {
+		err := tx.QueryRow(t.Context(), `
+			INSERT INTO core.shipments (
+			    owner_tenant_id, sscc, lot_id, quantity, gtin, product_name, lot_number, expiration_date,
+			    min_temp_celsius, max_temp_celsius,
+			    origin_location_id, origin_gln, origin_name, origin_latitude, origin_longitude,
+			    origin_geo_fence_radius_meters,
+			    destination_location_id, destination_gln, destination_name, destination_latitude,
+			    destination_longitude, destination_geo_fence_radius_meters,
+			    consignee_tenant_id, carrier_tenant_id, created_by)
+			SELECT $1, $2, l.id, $3, l.gtin, l.product_name, l.lot_number, l.expiration_date,
+			       l.min_temp_celsius, l.max_temp_celsius,
+			       o.id, o.gln, o.name, o.latitude, o.longitude, o.geo_fence_radius_meters,
+			       d.id, d.gln, d.name, d.latitude, d.longitude, d.geo_fence_radius_meters,
+			       d.tenant_id, $4, $5
+			FROM core.lots l, core.locations o, core.locations d
+			WHERE l.id = $6 AND o.id = $7 AND d.id = $8
+			RETURNING id`,
+			spec.Owner.ID, s.SSCC, spec.Quantity, spec.Carrier.ID, spec.Owner.Admin.ID,
+			spec.Lot.ID, spec.Origin.ID, spec.Destination.ID,
+		).Scan(&s.ID)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `
+			INSERT INTO core.shipment_participants (shipment_id, tenant_id, role, tenant_code, tenant_legal_name)
+			SELECT $1, p.tenant_id, p.role, t.code, t.legal_name
+			FROM (VALUES ($2::uuid, 'OWNER'), ($3::uuid, 'CARRIER'), ($4::uuid, 'CONSIGNEE')) p (tenant_id, role)
+			JOIN core.tenants t ON t.id = p.tenant_id`,
+			s.ID, spec.Owner.ID, spec.Carrier.ID, spec.Consignee.ID)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("create fixture shipment: %v", err)
+	}
+	return s
+}

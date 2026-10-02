@@ -3,6 +3,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"github.com/veritrace-platform/core-business-service/internal/inventory"
 	"github.com/veritrace-platform/core-business-service/internal/location"
 	"github.com/veritrace-platform/core-business-service/internal/lot"
+	"github.com/veritrace-platform/core-business-service/internal/outbox"
 	"github.com/veritrace-platform/core-business-service/internal/password"
 	"github.com/veritrace-platform/core-business-service/internal/product"
 	"github.com/veritrace-platform/core-business-service/internal/ratelimit"
@@ -37,6 +39,8 @@ const publicRequestsPerMinute = 10
 // Config holds the settings of the core service beyond the shared platform configuration.
 type Config struct {
 	Auth auth.Config
+	// KafkaBrokers are the bootstrap brokers that the outbox relay publishes to.
+	KafkaBrokers []string `env:"KAFKA_BROKERS" envSeparator:","`
 }
 
 // LoadConfig reads the core settings from the environment.
@@ -50,7 +54,14 @@ func LoadConfig() (Config, error) {
 
 // Validate reports the settings that are missing or invalid.
 func (c Config) Validate() error {
-	return c.Auth.Validate()
+	var errs []error
+	if err := c.Auth.Validate(); err != nil {
+		errs = append(errs, err)
+	}
+	if len(c.KafkaBrokers) == 0 {
+		errs = append(errs, errors.New("KAFKA_BROKERS is required"))
+	}
+	return errors.Join(errs...)
 }
 
 // Dependencies are the resources the service runs on.
@@ -65,7 +76,7 @@ type Dependencies struct {
 
 // NewHandler returns the public API handler.
 func NewHandler(cfg Config, deps Dependencies) (http.Handler, error) {
-	if err := cfg.Validate(); err != nil {
+	if err := cfg.Auth.Validate(); err != nil {
 		return nil, err
 	}
 	now := deps.Now
@@ -113,4 +124,18 @@ func NewHandler(cfg Config, deps Dependencies) (http.Handler, error) {
 		},
 		WellKnown: []httpapi.Routes{sessions.WellKnownRoutes},
 	}), nil
+}
+
+// NewRelay returns the outbox relay that publishes shipment events to Kafka, and a function that closes its
+// broker connections.
+func NewRelay(cfg Config, deps Dependencies) (*outbox.Relay, func(), error) {
+	publisher, err := outbox.NewKafkaPublisher(cfg.KafkaBrokers)
+	if err != nil {
+		return nil, nil, err
+	}
+	now := deps.Now
+	if now == nil {
+		now = time.Now
+	}
+	return outbox.NewRelay(deps.Pool, publisher, deps.Logger, now), publisher.Close, nil
 }

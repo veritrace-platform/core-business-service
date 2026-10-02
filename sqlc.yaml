@@ -97,6 +97,20 @@ sql:
         out: internal/inventory/queries
   - engine: postgresql
     schema: migrations
+    queries: internal/event/queries
+    gen:
+      go:
+        <<: *go
+        out: internal/event/queries
+  - engine: postgresql
+    schema: migrations
+    queries: internal/outbox/queries
+    gen:
+      go:
+        <<: *go
+        out: internal/outbox/queries
+  - engine: postgresql
+    schema: migrations
     queries: internal/directory/queries
     gen:
       go:

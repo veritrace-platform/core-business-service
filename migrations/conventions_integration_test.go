@@ -167,7 +167,8 @@ func TestSchemaConventions(t *testing.T) {
 			t.Fatalf("create broken objects: %v", err)
 		}
 
-		got := violations(t, tx, conventions{appendOnly: []string{"probe_append_only"}})
+		// The real exemptions stay, so that only the broken objects are reported.
+		got := violations(t, tx, conventions{withoutRLS: schemaConventions.withoutRLS, appendOnly: []string{"probe_append_only"}})
 		slices.Sort(got)
 		want := slices.Sorted(slices.Values(brokenDDLViolations))
 		if !slices.Equal(got, want) {
