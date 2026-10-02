@@ -104,6 +104,13 @@ sql:
         out: internal/shipment/queries
   - engine: postgresql
     schema: migrations
+    queries: internal/recall/queries
+    gen:
+      go:
+        <<: *go
+        out: internal/recall/queries
+  - engine: postgresql
+    schema: migrations
     queries: internal/event/queries
     gen:
       go:

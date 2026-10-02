@@ -994,6 +994,66 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/lots/{lot_id}/recall:
+    parameters:
+      - name: lot_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: recallLot
+      tags: [Lots]
+      summary: Recall a lot
+      description: |
+        `ADMIN` of the tenant that owns the lot, while the lot is `ACTIVE`; a recalled lot answers
+        `409 INVALID_STATE_TRANSITION`. In one transaction the lot becomes `RECALLED`, and every shipment of it in
+        `CREATED`, `IN_TRANSIT`, or `DELIVERED`, of any tenant and hop, becomes `RECALLED` with a `shipment.recalled`
+        event that records the reason and the previous status. From then on the lot takes no new shipments
+        (`409 LOT_RECALLED`), and its shipments refuse every command (`409 SHIPMENT_RECALLED_LOCKED`). Stock stays
+        where it is.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecallRequest"
+            example:
+              reason: Supplier reported contamination
+      responses:
+        "201":
+          description: The lot is recalled.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Recall"
+              example:
+                id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7dc1
+                lot_id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d95
+                reason: Supplier reported contamination
+                affected_shipment_count: 4
+                initiated_by: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d90
+                created_at: "2026-10-02T09:00:00.000001Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/inventory:
     get:
       operationId: listInventory
@@ -2083,6 +2143,36 @@ components:
           type: string
           format: uuid
           description: An active location of the caller's tenant, where the goods were produced or stored.
+    RecallRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 1000
+    Recall:
+      type: object
+      required: [id, lot_id, reason, affected_shipment_count, initiated_by, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        lot_id:
+          type: string
+          format: uuid
+        reason:
+          type: string
+        affected_shipment_count:
+          type: integer
+          description: Shipments of the lot, across all tenants, that became `RECALLED`.
+        initiated_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
     LotPage:
       type: object
       required: [items, next_cursor]

@@ -936,3 +936,48 @@ func TestCustodyHandover(t *testing.T) {
 		t.Errorf("integrity: status = %d, result = %+v", resp.status, integrity)
 	}
 }
+
+func TestEmergencyRecall(t *testing.T) {
+	a := startAPI(t)
+	w := newShipmentWorld(a)
+	created, resp := a.createShipment(w, 100)
+	if resp.status != http.StatusCreated {
+		t.Fatalf("create: status = %d", resp.status)
+	}
+
+	var problem httpx.Problem
+	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/lots/" + w.lot.ID.String() + "/recall", token: w.consigneeSession.AccessToken,
+		body: map[string]any{"reason": "not ours"}}, &problem); resp.status != http.StatusNotFound {
+		t.Errorf("consignee recalling a lot it never held: status = %d, want 404", resp.status)
+	}
+	var recalled struct {
+		ID                    string `json:"id"`
+		AffectedShipmentCount int    `json:"affected_shipment_count"`
+	}
+	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/lots/" + w.lot.ID.String() + "/recall", token: w.ownerSession.AccessToken,
+		body: map[string]any{"reason": "Supplier reported contamination"}}, &recalled); resp.status != http.StatusCreated || recalled.AffectedShipmentCount != 1 {
+		t.Fatalf("recall: status = %d, recall = %+v", resp.status, recalled)
+	}
+
+	// Every participant sees the shipment locked, and its log still verifies.
+	var sh shipmentBody
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/shipments/" + created.ID, token: w.consigneeSession.AccessToken}, &sh); resp.status != http.StatusOK ||
+		sh.Status != "RECALLED" {
+		t.Errorf("consignee view: status = %d, shipment = %+v", resp.status, sh)
+	}
+	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/shipments/" + created.ID + "/driver", token: w.carrierSession.AccessToken,
+		body: map[string]any{"driver_user_id": w.driverID}}, &problem); resp.status != http.StatusConflict || problem.Code != "SHIPMENT_RECALLED_LOCKED" {
+		t.Errorf("command on a recalled shipment: status = %d, problem = %+v", resp.status, problem)
+	}
+	var integrity struct {
+		Valid      bool `json:"valid"`
+		EventCount int  `json:"event_count"`
+	}
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/shipments/" + created.ID + "/integrity", token: w.carrierSession.AccessToken}, &integrity); resp.status != http.StatusOK ||
+		!integrity.Valid || integrity.EventCount != 2 {
+		t.Errorf("integrity: status = %d, result = %+v", resp.status, integrity)
+	}
+	if _, resp := a.createShipment(w, 1); resp.status != http.StatusConflict {
+		t.Errorf("new shipment of a recalled lot: status = %d, want 409", resp.status)
+	}
+}

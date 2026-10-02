@@ -24,6 +24,7 @@ import (
 	"github.com/veritrace-platform/core-business-service/internal/password"
 	"github.com/veritrace-platform/core-business-service/internal/product"
 	"github.com/veritrace-platform/core-business-service/internal/ratelimit"
+	"github.com/veritrace-platform/core-business-service/internal/recall"
 	"github.com/veritrace-platform/core-business-service/internal/shipment"
 	"github.com/veritrace-platform/core-business-service/internal/tenancy"
 	"github.com/veritrace-platform/core-business-service/internal/tenant"
@@ -141,13 +142,14 @@ func NewHandler(cfg Config, deps Dependencies) (http.Handler, error) {
 	lots := lot.NewHandler(lot.NewService(lot.NewPostgresStore(db)), authenticate, deps.Logger)
 	stock := inventory.NewHandler(inventory.NewService(inventory.NewPostgresStore(db)), authenticate, deps.Logger)
 	shipments := shipment.NewHandler(shipment.NewService(shipment.NewPostgresStore(db), pepper, now), authenticate, deps.Logger)
+	recalls := recall.NewHandler(recall.NewService(recall.NewPostgresStore(db)), authenticate, deps.Logger)
 	directoryHandler := directory.NewHandler(directory.NewService(directory.NewPostgresStore(deps.Pool)), authenticate,
 		deps.Logger)
 
 	return httpapi.NewRouter(deps.Logger, deps.Registerer, httpapi.Mounts{
 		API: []httpapi.Routes{
 			tenantHandler.Routes, sessions.Routes, users.Routes, locations.Routes, products.Routes, lots.Routes,
-			stock.Routes, shipments.Routes, directoryHandler.Routes,
+			stock.Routes, shipments.Routes, recalls.Routes, directoryHandler.Routes,
 		},
 		WellKnown: []httpapi.Routes{sessions.WellKnownRoutes},
 	}), nil
