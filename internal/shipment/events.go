@@ -62,3 +62,9 @@ type driverData struct {
 type cancelledData struct {
 	Reason string `json:"reason"`
 }
+
+type pickupData struct {
+	DriverUserID   uuid.UUID `json:"driver_user_id"`
+	Position       Position  `json:"position"`
+	DistanceMeters float64   `json:"distance_meters"`
+}

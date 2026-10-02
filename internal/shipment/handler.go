@@ -29,6 +29,8 @@ type Shipments interface {
 	AssignCarrier(ctx context.Context, p identity.Principal, id uuid.UUID, carrierCode string) (Shipment, error)
 	AssignDriver(ctx context.Context, p identity.Principal, id, driverID uuid.UUID) (Shipment, error)
 	Cancel(ctx context.Context, p identity.Principal, id uuid.UUID, reason string) (Shipment, error)
+	IssuePickupCode(ctx context.Context, p identity.Principal, id uuid.UUID) (IssuedCode, error)
+	ConfirmPickup(ctx context.Context, p identity.Principal, id uuid.UUID, pickup Pickup) (Shipment, error)
 	Events(ctx context.Context, p identity.Principal, id uuid.UUID, page event.Page) ([]event.Event, error)
 	Integrity(ctx context.Context, p identity.Principal, id uuid.UUID) (event.Integrity, error)
 }
@@ -56,6 +58,8 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Post("/shipments/{shipment_id}/carrier", h.assignCarrier)
 		r.Post("/shipments/{shipment_id}/driver", h.assignDriver)
 		r.Post("/shipments/{shipment_id}/cancel", h.cancel)
+		r.Post("/shipments/{shipment_id}/pickup-code", h.issuePickupCode)
+		r.Post("/shipments/{shipment_id}/pickup", h.confirmPickup)
 		r.Get("/shipments/{shipment_id}/events", h.events)
 		r.Get("/shipments/{shipment_id}/integrity", h.integrity)
 	})
@@ -246,6 +250,42 @@ func (h *Handler) cancel(w http.ResponseWriter, r *http.Request) {
 	h.respond(w, r, s, err, "shipment cancelled")
 }
 
+// issuePickupCode answers the code once; it is never stored in plain text, logged, or cached.
+func (h *Handler) issuePickupCode(w http.ResponseWriter, r *http.Request) {
+	p, ok := rest.Principal(w, r)
+	if !ok {
+		return
+	}
+	id, ok := rest.PathID(w, r, "shipment_id")
+	if !ok {
+		return
+	}
+	issued, err := h.shipments.IssuePickupCode(r.Context(), p, id)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	h.logger.InfoContext(r.Context(), "pickup code issued", slog.String("shipment_id", id.String()))
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.WriteJSON(w, r, http.StatusCreated, issued)
+}
+
+func (h *Handler) confirmPickup(w http.ResponseWriter, r *http.Request) {
+	var req pickupRequest
+	p, id, ok := decodeCommand(w, r, &req)
+	if !ok {
+		return
+	}
+	var v rest.Validator
+	pickup := req.validate(&v)
+	if problem := v.Problem(); problem != nil {
+		httpx.WriteProblem(w, r, *problem)
+		return
+	}
+	s, err := h.shipments.ConfirmPickup(r.Context(), p, id, pickup)
+	h.respond(w, r, s, err, "pickup confirmed")
+}
+
 func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
 	p, ok := rest.Principal(w, r)
 	if !ok {
@@ -322,10 +362,41 @@ func (h *Handler) integrity(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, r, http.StatusOK, result)
 }
 
+// pickupCodeProblems maps each refusal of a pickup code to its status and problem code.
+var pickupCodeProblems = map[PickupCodeReason]struct {
+	status int
+	code   string
+	detail string
+}{
+	PickupCodeInvalid: {http.StatusUnprocessableEntity, rest.CodePickupCodeInvalid, "the pickup code is wrong"},
+	PickupCodeExpired: {http.StatusUnprocessableEntity, rest.CodePickupCodeExpired, "no pickup code is active; ask for a new one"},
+	PickupCodeLocked: {http.StatusLocked, rest.CodePickupCodeLocked,
+		"the pickup code has no attempts left; ask for a new one"},
+}
+
 func (h *Handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	var invalid *InvalidReferenceError
 	var denial *policy.DenialError
+	var codeErr *PickupCodeError
+	var outside *OutsideGeofenceError
 	switch {
+	case errors.Is(err, ErrSSCCMismatch):
+		httpx.WriteProblem(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, rest.CodeSSCCMismatch,
+			"the scanned SSCC is not this shipment's"))
+	case errors.As(err, &codeErr):
+		problem := pickupCodeProblems[codeErr.Reason]
+		p := httpx.NewProblem(problem.status, problem.code, problem.detail)
+		if codeErr.Reason == PickupCodeInvalid {
+			p.Extensions = map[string]any{"remaining_attempts": codeErr.RemainingAttempts}
+		}
+		httpx.WriteProblem(w, r, p)
+	case errors.As(err, &outside):
+		p := httpx.NewProblem(http.StatusUnprocessableEntity, rest.CodeOutsideGeofence, outside.Error())
+		p.Extensions = map[string]any{"distance_meters": outside.DistanceMeters, "allowed_meters": outside.AllowedMeters}
+		httpx.WriteProblem(w, r, p)
+	case errors.As(err, &denial) && denial.Check == policy.DriverAssigned:
+		httpx.WriteProblem(w, r, httpx.NewProblem(http.StatusConflict, rest.CodeInvalidStateTransition,
+			"assign a driver before issuing a pickup code"))
 	case errors.As(err, &invalid):
 		httpx.WriteProblem(w, r, httpx.ValidationProblem([]httpx.FieldError{
 			{Field: invalid.Field, Code: httpx.FieldInvalidValue, Message: invalid.Message},

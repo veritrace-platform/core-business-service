@@ -39,11 +39,14 @@ func startAPI(t *testing.T) *api {
 	db := tenancytest.Start(t)
 	seed := make([]byte, ed25519.SeedSize)
 	_, _ = rand.Read(seed)
-	cfg := app.Config{Auth: auth.Config{
-		SigningKeys:     "test:" + base64.StdEncoding.EncodeToString(seed),
-		RefreshTokenTTL: 168 * time.Hour,
-		TrustedProxies:  "127.0.0.0/8,::1/128",
-	}}
+	cfg := app.Config{
+		Auth: auth.Config{
+			SigningKeys:     "test:" + base64.StdEncoding.EncodeToString(seed),
+			RefreshTokenTTL: 168 * time.Hour,
+			TrustedProxies:  "127.0.0.0/8,::1/128",
+		},
+		PickupCodePepper: base64.StdEncoding.EncodeToString(seed),
+	}
 	handler, err := app.NewHandler(cfg, app.Dependencies{
 		Logger:     slog.New(slog.DiscardHandler),
 		Registerer: prometheus.NewRegistry(),
@@ -98,7 +101,12 @@ func (a *api) do(req request, out any) response {
 		a.t.Fatalf("%s %s: %v", req.method, req.path, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	_, isProblem := out.(*httpx.Problem)
+	// Problems decode into an *httpx.Problem, or into a map to read their extension members.
+	isProblem := false
+	switch out.(type) {
+	case *httpx.Problem, *map[string]any:
+		isProblem = true
+	}
 	if out != nil && (resp.StatusCode >= 400) == isProblem && resp.StatusCode != http.StatusNoContent {
 		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
 			a.t.Fatalf("%s %s: decode response: %v", req.method, req.path, err)
@@ -852,5 +860,44 @@ func TestShipmentCommandsAndReads(t *testing.T) {
 	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/shipments/" + created.ID + "/cancel", token: w.ownerSession.AccessToken,
 		body: map[string]any{"reason": "again"}}, &problem); resp.status != http.StatusConflict || problem.Code != "INVALID_STATE_TRANSITION" {
 		t.Errorf("cancel twice: status = %d, problem = %+v", resp.status, problem)
+	}
+}
+
+func TestPickupHandover(t *testing.T) {
+	a := startAPI(t)
+	w := newShipmentWorld(a)
+	created, resp := a.createShipment(w, 100)
+	if resp.status != http.StatusCreated {
+		t.Fatalf("create: status = %d", resp.status)
+	}
+	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/shipments/" + created.ID + "/driver", token: w.carrierSession.AccessToken,
+		body: map[string]any{"driver_user_id": w.driverID}}, nil); resp.status != http.StatusOK {
+		t.Fatalf("assign driver: status = %d", resp.status)
+	}
+
+	var issued struct {
+		Code      string `json:"code"`
+		ExpiresAt string `json:"expires_at"`
+	}
+	resp = a.do(request{method: http.MethodPost, path: "/api/v1/shipments/" + created.ID + "/pickup-code", token: w.ownerSession.AccessToken}, &issued)
+	if resp.status != http.StatusCreated || len(issued.Code) != 6 || resp.header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("issue code: status = %d, code %q", resp.status, issued.Code)
+	}
+
+	// Fixture locations stand at 10.8, 106.65.
+	pickup := map[string]any{"sscc": created.SSCC, "code": "000000", "position": map[string]any{"latitude": 10.8001, "longitude": 106.65, "accuracy_meters": 10}}
+	if issued.Code == "000000" {
+		pickup["code"] = "000001"
+	}
+	var refused map[string]any
+	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/shipments/" + created.ID + "/pickup", token: w.driverSession.AccessToken, body: pickup},
+		&refused); resp.status != http.StatusUnprocessableEntity || refused["code"] != "PICKUP_CODE_INVALID" || refused["remaining_attempts"] != 4.0 {
+		t.Errorf("wrong code: status = %d, problem = %v", resp.status, refused)
+	}
+	pickup["code"] = issued.Code
+	var picked shipmentBody
+	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/shipments/" + created.ID + "/pickup", token: w.driverSession.AccessToken, body: pickup},
+		&picked); resp.status != http.StatusOK || picked.Status != "IN_TRANSIT" {
+		t.Errorf("pickup: status = %d, shipment = %+v", resp.status, picked)
 	}
 }

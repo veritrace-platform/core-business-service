@@ -2,11 +2,13 @@ package shipment
 
 import (
 	"math"
+	"regexp"
 	"strings"
 
 	"github.com/google/uuid"
 
 	"github.com/veritrace-platform/core-business-service/internal/gs1"
+	"github.com/veritrace-platform/core-business-service/internal/location"
 	"github.com/veritrace-platform/core-business-service/internal/platform/httpx"
 	"github.com/veritrace-platform/core-business-service/internal/rest"
 )
@@ -93,4 +95,65 @@ type cancelRequest struct {
 func (req *cancelRequest) validate(v *rest.Validator) string {
 	v.Text("reason", &req.Reason, 1, maxReasonLength)
 	return req.Reason
+}
+
+// maxAccuracyMeters bounds the reported accuracy of a position; the geo-fence counts at most 50 m of it.
+const maxAccuracyMeters = 100_000
+
+// positionRequest is a device position in a request body.
+type positionRequest struct {
+	Latitude       *float64 `json:"latitude"`
+	Longitude      *float64 `json:"longitude"`
+	AccuracyMeters *float64 `json:"accuracy_meters"`
+}
+
+// readPosition checks a required position, recording errors under position.*. Coordinates are rounded to six
+// decimals and the accuracy to one, as events record them.
+func readPosition(v *rest.Validator, req *positionRequest) Position {
+	if req == nil {
+		v.Add("position", httpx.FieldRequired, "is required")
+		return Position{}
+	}
+	var p Position
+	if v.Float("position.latitude", req.Latitude, -90, 90) {
+		p.Latitude = location.RoundCoordinate(*req.Latitude)
+	}
+	if v.Float("position.longitude", req.Longitude, -180, 180) {
+		p.Longitude = location.RoundCoordinate(*req.Longitude)
+	}
+	if v.Float("position.accuracy_meters", req.AccuracyMeters, 0, maxAccuracyMeters) {
+		p.AccuracyMeters = math.Round(*req.AccuracyMeters*10) / 10
+	}
+	return p
+}
+
+// scannedSSCC reads a required SSCC. A malformed one answers INVALID_GS1_IDENTIFIER rather than a mismatch.
+func scannedSSCC(v *rest.Validator, raw string) string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		v.Add("sscc", httpx.FieldRequired, "is required")
+	} else {
+		v.Key("sscc", gs1.ValidateSSCC(value))
+	}
+	return value
+}
+
+var pickupCodePattern = regexp.MustCompile(`^[0-9]{6}$`)
+
+// pickupRequest is the body of POST /api/v1/shipments/{shipment_id}/pickup.
+type pickupRequest struct {
+	SSCC     string           `json:"sscc"`
+	Code     string           `json:"code"`
+	Position *positionRequest `json:"position"`
+}
+
+func (req *pickupRequest) validate(v *rest.Validator) Pickup {
+	pickup := Pickup{SSCC: scannedSSCC(v, req.SSCC), Code: strings.TrimSpace(req.Code)}
+	if pickup.Code == "" {
+		v.Add("code", httpx.FieldRequired, "is required")
+	} else {
+		v.Matches("code", pickup.Code, pickupCodePattern, "must be 6 digits")
+	}
+	pickup.Position = readPosition(v, req.Position)
+	return pickup
 }

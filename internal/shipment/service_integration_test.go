@@ -29,7 +29,18 @@ type world struct {
 	plant, store                        tenancytest.Location
 	ownerManager, carrierManager        identity.Principal
 	ownDriver, carrierDriver            identity.Principal
+	clock                               *clock
 }
+
+// testPepper keys pickup code HMACs in tests.
+var testPepper = []byte("pickup code pepper for tests 0001")
+
+// clock is a test clock that only moves when told to.
+type clock struct{ now time.Time }
+
+func (c *clock) Now() time.Time { return c.now }
+
+func (c *clock) Advance(d time.Duration) { c.now = c.now.Add(d) }
 
 func as(u tenancytest.User) identity.Principal {
 	return identity.Principal{UserID: u.ID, TenantID: u.TenantID, Role: u.Role}
@@ -39,7 +50,8 @@ func newWorld(t *testing.T) world {
 	t.Helper()
 	db := tenancytest.Start(t)
 	w := world{db: db, owner: db.CreateTenant(t), carrier: db.CreateTenant(t), consignee: db.CreateTenant(t), stranger: db.CreateTenant(t)}
-	w.svc = shipment.NewService(shipment.NewPostgresStore(db.Tenancy), time.Now)
+	w.clock = &clock{now: time.Now().UTC()}
+	w.svc = shipment.NewService(shipment.NewPostgresStore(db.Tenancy), testPepper, w.clock.Now)
 	w.product = db.CreateProduct(t, w.owner)
 	w.plant = db.CreateLocation(t, w.owner)
 	w.lot = db.CommissionLot(t, w.owner, w.product, w.plant, 500)

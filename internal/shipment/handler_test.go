@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
@@ -34,6 +35,7 @@ type fakeShipments struct {
 	gotPage   event.Page
 	gotID     uuid.UUID
 	gotArg    string
+	gotPickup shipment.Pickup
 }
 
 func (f *fakeShipments) Create(_ context.Context, _ identity.Principal, ns shipment.NewShipment) (shipment.Shipment, error) {
@@ -68,6 +70,16 @@ func (f *fakeShipments) AssignDriver(_ context.Context, _ identity.Principal, id
 func (f *fakeShipments) Cancel(_ context.Context, _ identity.Principal, id uuid.UUID, reason string) (shipment.Shipment, error) {
 	f.gotID, f.gotArg = id, reason
 	return shipment.Shipment{ID: id, Status: policy.ShipmentCancelled}, f.err
+}
+
+func (f *fakeShipments) IssuePickupCode(_ context.Context, _ identity.Principal, id uuid.UUID) (shipment.IssuedCode, error) {
+	f.gotID = id
+	return shipment.IssuedCode{Code: "042917", ExpiresAt: time.Date(2026, 10, 2, 8, 15, 0, 0, time.UTC), AttemptsAllowed: 5}, f.err
+}
+
+func (f *fakeShipments) ConfirmPickup(_ context.Context, _ identity.Principal, id uuid.UUID, pickup shipment.Pickup) (shipment.Shipment, error) {
+	f.gotID, f.gotPickup = id, pickup
+	return shipment.Shipment{ID: id, Status: policy.ShipmentInTransit}, f.err
 }
 
 func (f *fakeShipments) Events(_ context.Context, _ identity.Principal, id uuid.UUID, page event.Page) ([]event.Event, error) {
@@ -294,5 +306,83 @@ func TestShipmentErrors(t *testing.T) {
 		if rec := call(t, &fakeShipments{err: shipment.ErrNotFound}, http.MethodGet, path, ""); rec.Code != http.StatusNotFound {
 			t.Errorf("GET %s: status = %d, want 404", path, rec.Code)
 		}
+	}
+}
+
+func TestPickupEndpoints(t *testing.T) {
+	id := uuid.New()
+	fake := &fakeShipments{}
+	rec := call(t, fake, http.MethodPost, "/api/v1/shipments/"+id.String()+"/pickup-code", "")
+	if rec.Code != http.StatusCreated || rec.Header().Get("Cache-Control") != "no-store" ||
+		!strings.Contains(rec.Body.String(), `"code":"042917","expires_at":"2026-10-02T08:15:00Z","attempts_allowed":5`) {
+		t.Errorf("issue: status = %d, headers %v, body %s", rec.Code, rec.Header(), rec.Body)
+	}
+
+	body := `{"sscc":" ` + sscc + ` ","code":"042917","position":{"latitude":10.80000049,"longitude":106.65,"accuracy_meters":12.34}}`
+	if rec := call(t, fake, http.MethodPost, "/api/v1/shipments/"+id.String()+"/pickup", body); rec.Code != http.StatusOK ||
+		!strings.Contains(rec.Body.String(), `"status":"IN_TRANSIT"`) {
+		t.Fatalf("pickup: status = %d, body %s", rec.Code, rec.Body)
+	}
+	if p := fake.gotPickup; p.SSCC != sscc || p.Code != "042917" || p.Position != (shipment.Position{Latitude: 10.8, Longitude: 106.65, AccuracyMeters: 12.3}) {
+		t.Errorf("pickup = %+v", p)
+	}
+
+	tests := []struct {
+		body, field, code string
+		status            int
+	}{
+		{`{"code":"042917","position":{"latitude":1,"longitude":1,"accuracy_meters":1}}`, "sscc", httpx.FieldRequired, http.StatusBadRequest},
+		{`{"sscc":"089300010000000017","code":"042917","position":{"latitude":1,"longitude":1,"accuracy_meters":1}}`, "sscc", string(gs1.ReasonCheckDigit), http.StatusUnprocessableEntity},
+		{`{"sscc":"` + sscc + `","code":"42917","position":{"latitude":1,"longitude":1,"accuracy_meters":1}}`, "code", httpx.FieldInvalidFormat, http.StatusBadRequest},
+		{`{"sscc":"` + sscc + `","code":"042917"}`, "position", httpx.FieldRequired, http.StatusBadRequest},
+		{`{"sscc":"` + sscc + `","code":"042917","position":{"latitude":91,"longitude":1,"accuracy_meters":1}}`, "position.latitude", httpx.FieldOutOfRange, http.StatusBadRequest},
+		{`{"sscc":"` + sscc + `","code":"042917","position":{"latitude":1,"longitude":1}}`, "position.accuracy_meters", httpx.FieldRequired, http.StatusBadRequest},
+	}
+	for _, tt := range tests {
+		rec := call(t, &fakeShipments{}, http.MethodPost, "/api/v1/shipments/"+id.String()+"/pickup", tt.body)
+		p := problem(t, rec)
+		if rec.Code != tt.status || len(p.Errors) != 1 || p.Errors[0].Field != tt.field || p.Errors[0].Code != tt.code {
+			t.Errorf("%s: status = %d, errors = %+v; want %d with %s on %s", tt.body, rec.Code, p.Errors, tt.status, tt.code, tt.field)
+		}
+	}
+}
+
+func TestHandoverProblems(t *testing.T) {
+	path := "/api/v1/shipments/" + uuid.New().String() + "/pickup"
+	body := `{"sscc":"` + sscc + `","code":"042917","position":{"latitude":10.8,"longitude":106.65,"accuracy_meters":8}}`
+	tests := []struct {
+		err        error
+		status     int
+		code       string
+		extensions map[string]any
+	}{
+		{shipment.ErrSSCCMismatch, http.StatusUnprocessableEntity, "SSCC_MISMATCH", nil},
+		{&shipment.PickupCodeError{Reason: shipment.PickupCodeInvalid, RemainingAttempts: 3}, http.StatusUnprocessableEntity, "PICKUP_CODE_INVALID",
+			map[string]any{"remaining_attempts": 3.0}},
+		{&shipment.PickupCodeError{Reason: shipment.PickupCodeExpired}, http.StatusUnprocessableEntity, "PICKUP_CODE_EXPIRED", nil},
+		{&shipment.PickupCodeError{Reason: shipment.PickupCodeLocked}, http.StatusLocked, "PICKUP_CODE_LOCKED", nil},
+		{&shipment.OutsideGeofenceError{DistanceMeters: 1112.2, AllowedMeters: 208}, http.StatusUnprocessableEntity, "OUTSIDE_GEOFENCE",
+			map[string]any{"distance_meters": 1112.2, "allowed_meters": 208.0}},
+		{&policy.DenialError{Action: policy.ConfirmPickup, Reason: policy.ReasonShipmentRecalled}, http.StatusConflict, "SHIPMENT_RECALLED_LOCKED", nil},
+	}
+	for _, tt := range tests {
+		rec := call(t, &fakeShipments{err: tt.err}, http.MethodPost, path, body)
+		var got map[string]any
+		if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != tt.status || got["code"] != tt.code {
+			t.Errorf("%v: status = %d, problem = %v", tt.err, rec.Code, got)
+		}
+		for member, want := range tt.extensions {
+			if got[member] != want {
+				t.Errorf("%v: %s = %v, want %v", tt.err, member, got[member], want)
+			}
+		}
+	}
+	rec := call(t, &fakeShipments{err: &policy.DenialError{Action: policy.IssuePickupCode, Reason: policy.ReasonCheck, Check: policy.DriverAssigned}},
+		http.MethodPost, "/api/v1/shipments/"+uuid.New().String()+"/pickup-code", "")
+	if p := problem(t, rec); rec.Code != http.StatusConflict || p.Code != "INVALID_STATE_TRANSITION" {
+		t.Errorf("code without a driver: status = %d, problem = %+v", rec.Code, p)
 	}
 }

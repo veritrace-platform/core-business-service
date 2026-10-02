@@ -3,6 +3,7 @@
 package app
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -40,8 +41,25 @@ const publicRequestsPerMinute = 10
 // Config holds the settings of the core service beyond the shared platform configuration.
 type Config struct {
 	Auth auth.Config
+	// PickupCodePepper keys the HMAC of pickup codes: base64 of at least 32 random bytes.
+	PickupCodePepper string `env:"PICKUP_CODE_PEPPER"`
 	// KafkaBrokers are the bootstrap brokers that the outbox relay publishes to.
 	KafkaBrokers []string `env:"KAFKA_BROKERS" envSeparator:","`
+}
+
+// minPepperBytes is the smallest pickup code pepper: as long as the HMAC-SHA256 output.
+const minPepperBytes = 32
+
+// pepper decodes PickupCodePepper.
+func (c Config) pepper() ([]byte, error) {
+	if c.PickupCodePepper == "" {
+		return nil, errors.New("PICKUP_CODE_PEPPER is required")
+	}
+	pepper, err := base64.StdEncoding.DecodeString(c.PickupCodePepper)
+	if err != nil || len(pepper) < minPepperBytes {
+		return nil, fmt.Errorf("PICKUP_CODE_PEPPER must be base64 of at least %d bytes", minPepperBytes)
+	}
+	return pepper, nil
 }
 
 // LoadConfig reads the core settings from the environment.
@@ -57,6 +75,9 @@ func LoadConfig() (Config, error) {
 func (c Config) Validate() error {
 	var errs []error
 	if err := c.Auth.Validate(); err != nil {
+		errs = append(errs, err)
+	}
+	if _, err := c.pepper(); err != nil {
 		errs = append(errs, err)
 	}
 	if len(c.KafkaBrokers) == 0 {
@@ -78,6 +99,10 @@ type Dependencies struct {
 // NewHandler returns the public API handler.
 func NewHandler(cfg Config, deps Dependencies) (http.Handler, error) {
 	if err := cfg.Auth.Validate(); err != nil {
+		return nil, err
+	}
+	pepper, err := cfg.pepper()
+	if err != nil {
 		return nil, err
 	}
 	now := deps.Now
@@ -115,7 +140,7 @@ func NewHandler(cfg Config, deps Dependencies) (http.Handler, error) {
 	products := product.NewHandler(product.NewService(product.NewPostgresStore(db)), authenticate, deps.Logger)
 	lots := lot.NewHandler(lot.NewService(lot.NewPostgresStore(db)), authenticate, deps.Logger)
 	stock := inventory.NewHandler(inventory.NewService(inventory.NewPostgresStore(db)), authenticate, deps.Logger)
-	shipments := shipment.NewHandler(shipment.NewService(shipment.NewPostgresStore(db), now), authenticate, deps.Logger)
+	shipments := shipment.NewHandler(shipment.NewService(shipment.NewPostgresStore(db), pepper, now), authenticate, deps.Logger)
 	directoryHandler := directory.NewHandler(directory.NewService(directory.NewPostgresStore(deps.Pool)), authenticate,
 		deps.Logger)
 

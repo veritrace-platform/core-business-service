@@ -21,6 +21,11 @@ const (
 	CodeInvalidGS1Identifier        = "INVALID_GS1_IDENTIFIER"
 	CodeInsufficientStock           = "INSUFFICIENT_STOCK"
 	CodeSSCCSerialExhausted         = "SSCC_SERIAL_EXHAUSTED"
+	CodeSSCCMismatch                = "SSCC_MISMATCH"
+	CodeOutsideGeofence             = "OUTSIDE_GEOFENCE"
+	CodePickupCodeInvalid           = "PICKUP_CODE_INVALID"
+	CodePickupCodeExpired           = "PICKUP_CODE_EXPIRED"
+	CodePickupCodeLocked            = "PICKUP_CODE_LOCKED"
 )
 
 // Field error codes of the core service. The shared codes are in httpx; GS1 keys use the gs1 reasons.

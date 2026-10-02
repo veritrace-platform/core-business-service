@@ -314,6 +314,57 @@ func (r repository) SetCancelled(ctx context.Context, id uuid.UUID, at time.Time
 	return nil
 }
 
+func (r repository) SetPickedUp(ctx context.Context, id uuid.UUID, at time.Time) error {
+	if err := r.q.SetPickedUp(ctx, queries.SetPickedUpParams{ID: id, PickedUpAt: &at}); err != nil {
+		return fmt.Errorf("mark shipment picked up: %w", err)
+	}
+	return nil
+}
+
+func (r repository) InvalidatePickupCodes(ctx context.Context, id uuid.UUID, at time.Time) error {
+	err := r.q.InvalidatePickupCodes(ctx, queries.InvalidatePickupCodesParams{ShipmentID: id, InvalidatedAt: &at})
+	if err != nil {
+		return fmt.Errorf("invalidate pickup codes: %w", err)
+	}
+	return nil
+}
+
+func (r repository) InsertPickupCode(ctx context.Context, id uuid.UUID, hash []byte, expiresAt time.Time, issuedBy uuid.UUID, at time.Time) error {
+	err := r.q.InsertPickupCode(ctx, queries.InsertPickupCodeParams{
+		ShipmentID: id, CodeHash: hash, ExpiresAt: expiresAt, IssuedBy: issuedBy, CreatedAt: at,
+	})
+	if err != nil {
+		return fmt.Errorf("insert pickup code: %w", err)
+	}
+	return nil
+}
+
+func (r repository) LockPickupCode(ctx context.Context, id uuid.UUID) (pickupCode, error) {
+	row, err := r.q.LockActivePickupCode(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return pickupCode{}, errNotVisible
+	}
+	if err != nil {
+		return pickupCode{}, fmt.Errorf("lock pickup code: %w", err)
+	}
+	return pickupCode{ID: row.ID, Hash: row.CodeHash, ExpiresAt: row.ExpiresAt, FailedAttempts: int(row.FailedAttempts)}, nil
+}
+
+func (r repository) RecordFailedAttempt(ctx context.Context, codeID uuid.UUID) (int, error) {
+	attempts, err := r.q.RecordFailedAttempt(ctx, codeID)
+	if err != nil {
+		return 0, fmt.Errorf("record failed attempt: %w", err)
+	}
+	return int(attempts), nil
+}
+
+func (r repository) ConsumePickupCode(ctx context.Context, codeID uuid.UUID, at time.Time) error {
+	if err := r.q.ConsumePickupCode(ctx, queries.ConsumePickupCodeParams{ID: codeID, ConsumedAt: &at}); err != nil {
+		return fmt.Errorf("consume pickup code: %w", err)
+	}
+	return nil
+}
+
 func (r repository) Events(ctx context.Context, id uuid.UUID, page event.Page) ([]event.Event, error) {
 	return event.List(ctx, r.tx, id, page)
 }

@@ -1306,6 +1306,97 @@ paths:
           $ref: "#/components/responses/UnsupportedMediaType"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/shipments/{shipment_id}/pickup-code:
+    parameters:
+      - $ref: "#/components/parameters/ShipmentID"
+    post:
+      operationId: issuePickupCode
+      tags: [Shipments]
+      summary: Issue a pickup code
+      description: |
+        `ADMIN` and `WAREHOUSE_MANAGER` of the owner, while the shipment is `CREATED` and has a driver; otherwise
+        `409 INVALID_STATE_TRANSITION`. The 6-digit code is valid for 15 minutes and 5 attempts and replaces any code
+        issued before. It is returned only here and stored only as an HMAC: hand it to the driver at the dock.
+        Assigning another driver or carrier, or cancelling, ends it.
+      responses:
+        "201":
+          description: The code. The response must not be cached.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PickupCode"
+              example:
+                code: "042917"
+                expires_at: "2026-10-02T08:15:00.123456Z"
+                attempts_allowed: 5
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/shipments/{shipment_id}/pickup:
+    parameters:
+      - $ref: "#/components/parameters/ShipmentID"
+    post:
+      operationId: confirmPickup
+      tags: [Shipments]
+      summary: Confirm pickup
+      description: |
+        The assigned `DRIVER` takes custody at the origin. The checks run in this order: the shipment is not
+        recalled (`409 SHIPMENT_RECALLED_LOCKED`) and is `CREATED` (`409 INVALID_STATE_TRANSITION`); the caller is
+        its assigned driver (403); the scanned SSCC is the shipment's (`422 SSCC_MISMATCH`); a code is active
+        (`422 PICKUP_CODE_EXPIRED`) and has attempts left (`423 PICKUP_CODE_LOCKED`); the code is right
+        (`422 PICKUP_CODE_INVALID` with `remaining_attempts`, and the attempt is spent); the position is inside the
+        origin geo-fence (`422 OUTSIDE_GEOFENCE` with `distance_meters` and `allowed_meters`). On success the code
+        is consumed, the shipment is `IN_TRANSIT`, and `shipment.pickup_confirmed` records the position.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PickupConfirmation"
+            example:
+              sscc: "089300010000000018"
+              code: "042917"
+              position:
+                latitude: 10.762701
+                longitude: 106.742912
+                accuracy_meters: 12
+      responses:
+        "200":
+          $ref: "#/components/responses/UpdatedShipment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "423":
+          $ref: "#/components/responses/Locked"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/shipments/{shipment_id}/events:
     parameters:
       - $ref: "#/components/parameters/ShipmentID"
@@ -1521,6 +1612,15 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/FieldError"
+        remaining_attempts:
+          type: integer
+          description: "`PICKUP_CODE_INVALID`: attempts left on the code."
+        distance_meters:
+          type: number
+          description: "`OUTSIDE_GEOFENCE`: distance between the reported position and the facility."
+        allowed_meters:
+          type: number
+          description: "`OUTSIDE_GEOFENCE`: the geo-fence radius plus the accuracy allowance (at most 50 m)."
     FieldError:
       type: object
       required: [field, code, message]
@@ -2572,7 +2672,9 @@ components:
           $ref: "#/components/schemas/User"
     Position:
       type: object
-      description: Device-reported WGS-84 position.
+      description: |
+        Device-reported WGS-84 position. Coordinates are rounded to 6 decimals and the accuracy to 1. A position
+        counts as at a facility within the geo-fence radius plus the accuracy, of which at most 50 m count.
       required: [latitude, longitude, accuracy_meters]
       properties:
         latitude:
@@ -2586,6 +2688,33 @@ components:
         accuracy_meters:
           type: number
           minimum: 0
+          maximum: 100000
+    PickupCode:
+      type: object
+      required: [code, expires_at, attempts_allowed]
+      properties:
+        code:
+          type: string
+          pattern: "^[0-9]{6}$"
+        expires_at:
+          type: string
+          format: date-time
+        attempts_allowed:
+          type: integer
+    PickupConfirmation:
+      type: object
+      additionalProperties: false
+      required: [sscc, code, position]
+      properties:
+        sscc:
+          type: string
+          description: The SSCC scanned from the pallet label.
+          pattern: "^[0-9]{18}$"
+        code:
+          type: string
+          pattern: "^[0-9]{6}$"
+        position:
+          $ref: "#/components/schemas/Position"
   responses:
     UpdatedShipment:
       description: The shipment after the command.
@@ -2685,6 +2814,15 @@ components:
             $ref: "#/components/schemas/Problem"
     UnprocessableContent:
       description: The request is well-formed but violates a domain rule.
+      headers:
+        X-Trace-Id:
+          $ref: "#/components/headers/TraceId"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Locked:
+      description: "`PICKUP_CODE_LOCKED`: the pickup code has no attempts left; the owner must issue a new one."
       headers:
         X-Trace-Id:
           $ref: "#/components/headers/TraceId"

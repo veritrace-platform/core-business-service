@@ -53,6 +53,15 @@ type Repository interface {
 	SetCarrier(ctx context.Context, id, carrierTenantID uuid.UUID) error
 	SetDriver(ctx context.Context, id, driverID uuid.UUID) error
 	SetCancelled(ctx context.Context, id uuid.UUID, at time.Time) error
+	SetPickedUp(ctx context.Context, id uuid.UUID, at time.Time) error
+	// InvalidatePickupCodes ends the shipment's active pickup code, if any.
+	InvalidatePickupCodes(ctx context.Context, id uuid.UUID, at time.Time) error
+	InsertPickupCode(ctx context.Context, id uuid.UUID, hash []byte, expiresAt time.Time, issuedBy uuid.UUID, at time.Time) error
+	// LockPickupCode reads the shipment's active pickup code and locks it; errNotVisible means none is active.
+	LockPickupCode(ctx context.Context, id uuid.UUID) (pickupCode, error)
+	// RecordFailedAttempt returns the number of failed attempts after this one.
+	RecordFailedAttempt(ctx context.Context, codeID uuid.UUID) (int, error)
+	ConsumePickupCode(ctx context.Context, codeID uuid.UUID, at time.Time) error
 	Events(ctx context.Context, id uuid.UUID, page event.Page) ([]event.Event, error)
 	AllEvents(ctx context.Context, id uuid.UUID) ([]event.Event, error)
 }
@@ -97,12 +106,14 @@ type newRow struct {
 // Service runs shipment commands and reads.
 type Service struct {
 	store Store
-	now   func() time.Time
+	// pepper keys the HMAC of pickup codes (PICKUP_CODE_PEPPER).
+	pepper []byte
+	now    func() time.Time
 }
 
 // NewService returns a Service.
-func NewService(store Store, now func() time.Time) *Service {
-	return &Service{store: store, now: now}
+func NewService(store Store, pepper []byte, now func() time.Time) *Service {
+	return &Service{store: store, pepper: pepper, now: now}
 }
 
 // participantParties are every party a caller can have in a shipment. Row-level security lists only shipments in
@@ -301,6 +312,10 @@ func (s *Service) AssignCarrier(ctx context.Context, p identity.Principal, id uu
 		if err := repo.SetCarrier(ctx, id, carrier.ID); err != nil {
 			return err
 		}
+		// A code issued for the released driver must not work for anyone.
+		if err := repo.InvalidatePickupCodes(ctx, id, now); err != nil {
+			return err
+		}
 		if err := repo.RemoveParticipant(ctx, id, sh.OwnerTenantID, RoleCarrier); err != nil {
 			return err
 		}
@@ -327,12 +342,17 @@ func (s *Service) AssignDriver(ctx context.Context, p identity.Principal, id, dr
 		if sh.assignedTo(driverID) {
 			return nil
 		}
+		now := s.now().UTC()
 		if err := repo.SetDriver(ctx, id, driverID); err != nil {
+			return err
+		}
+		// A code issued for the previous driver must not work for the new one.
+		if err := repo.InvalidatePickupCodes(ctx, id, now); err != nil {
 			return err
 		}
 		return repo.AppendEvent(ctx, event.New{
 			ShipmentID: id, SSCC: sh.SSCC, Status: sh.Status, Type: event.TypeDriverAssigned, Actor: actor(p),
-			OccurredAt: s.now(), Data: driverData{DriverUserID: driverID},
+			OccurredAt: now, Data: driverData{DriverUserID: driverID},
 		})
 	})
 }
@@ -349,6 +369,9 @@ func (s *Service) Cancel(ctx context.Context, p identity.Principal, id uuid.UUID
 		}
 		now := s.now().UTC()
 		if err := repo.SetCancelled(ctx, id, now); err != nil {
+			return err
+		}
+		if err := repo.InvalidatePickupCodes(ctx, id, now); err != nil {
 			return err
 		}
 		err = repo.ApplyMovement(ctx, inventory.Movement{
