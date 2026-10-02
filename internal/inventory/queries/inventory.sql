@@ -1,4 +1,5 @@
 -- name: AddToBalance :one
+-- PostgreSQL checks the proposed row before it looks for a conflict, so only positive quantities take this path.
 INSERT INTO core.inventory_balances AS b (
     tenant_id,
     location_id,
@@ -9,10 +10,17 @@ VALUES (
     sqlc.arg(tenant_id),
     sqlc.arg(location_id),
     sqlc.arg(lot_id),
-    sqlc.arg(quantity_delta)
+    sqlc.arg(quantity)
 )
 ON CONFLICT (location_id, lot_id) DO UPDATE
 SET quantity_on_hand = b.quantity_on_hand + excluded.quantity_on_hand
+RETURNING quantity_on_hand;
+
+-- name: TakeFromBalance :one
+UPDATE core.inventory_balances
+SET quantity_on_hand = quantity_on_hand - sqlc.arg(quantity)
+WHERE location_id = sqlc.arg(location_id)
+  AND lot_id = sqlc.arg(lot_id)
 RETURNING quantity_on_hand;
 
 -- name: RecordMovement :exec

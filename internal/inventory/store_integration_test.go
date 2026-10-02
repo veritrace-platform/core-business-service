@@ -41,14 +41,29 @@ func TestApplyMovement(t *testing.T) {
 		t.Errorf("second movement: balance = %d, %v; want 8", balance, err)
 	}
 
-	shipment := uuid.New()
+	// Stock leaves through shipments: a part of the balance, then more than is left, then from a location that
+	// holds none.
+	consignee := db.CreateTenant(t)
+	shipment := db.CreateShipment(t, tenancytest.ShipmentSpec{
+		Owner: tenant, Carrier: tenant, Consignee: consignee, Lot: lot, Origin: store,
+		Destination: consignee.Headquarters, Quantity: 5,
+	})
 	departure := inventory.Movement{
-		TenantID: tenant.ID, LocationID: store.ID, LotID: lot.ID, Delta: -9,
-		Reason: inventory.ReasonShipmentCreated, ShipmentID: &shipment, CreatedBy: tenant.Admin.ID,
+		TenantID: tenant.ID, LocationID: store.ID, LotID: lot.ID, Delta: -5,
+		Reason: inventory.ReasonShipmentCreated, ShipmentID: &shipment.ID, CreatedBy: tenant.Admin.ID,
 	}
+	if balance, err := apply(departure); err != nil || balance != 3 {
+		t.Errorf("taking 5 of 8: balance = %d, %v; want 3", balance, err)
+	}
+	departure.Delta = -4
 	if _, err := apply(departure); !errors.Is(err, inventory.ErrInsufficientStock) {
-		t.Errorf("taking 9 of 8: error = %v, want ErrInsufficientStock", err)
+		t.Errorf("taking 4 of 3: error = %v, want ErrInsufficientStock", err)
 	}
+	departure.LocationID, departure.Delta = db.CreateLocation(t, tenant).ID, -1
+	if _, err := apply(departure); !errors.Is(err, inventory.ErrInsufficientStock) {
+		t.Errorf("taking from a location without stock: error = %v, want ErrInsufficientStock", err)
+	}
+
 	var balance, movements int
 	if err := db.Owner.QueryRow(t.Context(), `
 		SELECT (SELECT quantity_on_hand FROM core.inventory_balances WHERE location_id = $1 AND lot_id = $2),
@@ -56,8 +71,8 @@ func TestApplyMovement(t *testing.T) {
 		store.ID, lot.ID).Scan(&balance, &movements); err != nil {
 		t.Fatalf("read the ledger: %v", err)
 	}
-	if balance != 8 || movements != 2 {
-		t.Errorf("ledger = balance %d with %d movements, want 8 with 2: the failed movement must leave no trace", balance, movements)
+	if balance != 3 || movements != 3 {
+		t.Errorf("ledger = balance %d with %d movements, want 3 with 3: failed movements must leave no trace", balance, movements)
 	}
 
 	// The ledger is append-only, and balances are never deleted.
