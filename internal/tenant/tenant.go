@@ -83,8 +83,14 @@ func (e *ConflictError) Error() string {
 	return fmt.Sprintf("%s is already registered", e.Key)
 }
 
-// ErrNotFound reports a tenant that does not exist or is not visible.
-var ErrNotFound = errors.New("tenant not found")
+// Tenant errors.
+var (
+	// ErrNotFound reports a tenant that does not exist or is not visible.
+	ErrNotFound = errors.New("tenant not found")
+	// ErrExtensionDigitUsed reports an SSCC extension digit that the tenant used before. Its serial space would
+	// start again, and SSCCs must never repeat.
+	ErrExtensionDigitUsed = errors.New("the SSCC extension digit has issued SSCCs before")
+)
 
 // ProfilePatch lists the changes to a tenant profile; nil fields stay as they are. The code, tax code, and
 // company prefix identify the tenant and never change.

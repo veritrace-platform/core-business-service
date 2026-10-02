@@ -206,7 +206,7 @@ var rules = map[Action]rule{
 	ViewInventory: {parties: []Party{OwnTenant}, roles: managers},
 	CreateShipment: {
 		parties: []Party{LotHolder}, roles: managers, lotStates: []LotStatus{LotActive}, fromLot: true,
-		checks: []Check{SufficientBalance, OriginOwned},
+		checks: []Check{OriginOwned, SufficientBalance},
 	},
 	AssignCarrier: {
 		parties: []Party{Owner}, roles: managers, command: true,

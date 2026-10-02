@@ -121,7 +121,8 @@ func TestProfileErrors(t *testing.T) {
 }
 
 type fakeProfileStore struct {
-	got tenant.ProfilePatch
+	got  tenant.ProfilePatch
+	used map[int]bool
 }
 
 func (f *fakeProfileStore) WithTenantTx(_ context.Context, _ uuid.UUID, fn func(tenant.ProfileRepository) error) error {
@@ -135,6 +136,30 @@ func (f *fakeProfileStore) Get(_ context.Context, id uuid.UUID) (tenant.Tenant, 
 func (f *fakeProfileStore) Update(_ context.Context, id uuid.UUID, p tenant.ProfilePatch) (tenant.Tenant, error) {
 	f.got = p
 	return tenant.Tenant{ID: id}, nil
+}
+
+func (f *fakeProfileStore) ExtensionDigitUsed(_ context.Context, _ uuid.UUID, digit int) (bool, error) {
+	return f.used[digit], nil
+}
+
+func TestUsedExtensionDigitsAreRejected(t *testing.T) {
+	store := &fakeProfileStore{used: map[int]bool{0: true, 3: true}}
+	svc := tenant.NewService(nil, store, nil)
+	used, fresh, current := 3, 5, 0
+	if _, err := svc.UpdateProfile(t.Context(), admin, tenant.ProfilePatch{SSCCExtensionDigit: &used}); !errors.Is(err, tenant.ErrExtensionDigitUsed) {
+		t.Errorf("used digit: error = %v, want ErrExtensionDigitUsed", err)
+	}
+	for _, digit := range []*int{&fresh, &current} {
+		if _, err := svc.UpdateProfile(t.Context(), admin, tenant.ProfilePatch{SSCCExtensionDigit: digit}); err != nil {
+			t.Errorf("digit %d: %v", *digit, err)
+		}
+	}
+
+	rec := send(t, newProfileRouter(&fakeRegisterer{}, &fakeProfiles{err: tenant.ErrExtensionDigitUsed}, &admin), http.MethodPatch,
+		`{"sscc_extension_digit":3}`)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"field":"sscc_extension_digit"`) {
+		t.Errorf("used digit: status = %d, body %s", rec.Code, rec.Body)
+	}
 }
 
 func TestProfileServiceRequiresAdmin(t *testing.T) {

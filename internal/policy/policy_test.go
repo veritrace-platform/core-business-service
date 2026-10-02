@@ -47,7 +47,7 @@ var matrix = map[policy.Action]row{
 	policy.ManageProducts:      {parties: []policy.Party{policy.OwnTenant}, roles: managers, checks: []policy.Check{policy.GTINPrefix}},
 	policy.CommissionLot:       {parties: []policy.Party{policy.OwnTenant}, roles: managers, checks: []policy.Check{policy.ProductOwned, policy.LocationOwned}},
 	policy.ViewInventory:       {parties: []policy.Party{policy.OwnTenant}, roles: managers},
-	policy.CreateShipment:      {parties: []policy.Party{policy.LotHolder}, roles: managers, lotStates: active, checks: []policy.Check{policy.SufficientBalance, policy.OriginOwned}},
+	policy.CreateShipment:      {parties: []policy.Party{policy.LotHolder}, roles: managers, lotStates: active, checks: []policy.Check{policy.OriginOwned, policy.SufficientBalance}},
 	policy.AssignCarrier:       {parties: []policy.Party{policy.Owner}, roles: managers, shipmentStates: created, command: true, checks: []policy.Check{policy.NoExternalCarrier}},
 	policy.AssignDriver:        {parties: []policy.Party{policy.Carrier}, roles: managers, shipmentStates: created, command: true, checks: []policy.Check{policy.DriverEligible}},
 	policy.IssuePickupCode:     {parties: []policy.Party{policy.Owner}, roles: managers, shipmentStates: created, command: true, checks: []policy.Check{policy.DriverAssigned}},

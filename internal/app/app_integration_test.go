@@ -731,3 +731,126 @@ func TestLotsAndInventory(t *testing.T) {
 		t.Errorf("driver reading the inventory: status = %d, want 403", resp.status)
 	}
 }
+
+// shipmentWorld is an owner with 500 units at a plant, a carrier with a manager and a driver, and a consignee
+// with a store, all signed in.
+type shipmentWorld struct {
+	owner, carrier, consignee       tenancytest.Tenant
+	lot                             tenancytest.Lot
+	plant, store                    tenancytest.Location
+	ownerSession, carrierSession    session
+	driverSession, consigneeSession session
+	driverID                        string
+}
+
+func newShipmentWorld(a *api) shipmentWorld {
+	t := a.t
+	w := shipmentWorld{owner: a.db.CreateTenant(t), carrier: a.db.CreateTenant(t), consignee: a.db.CreateTenant(t)}
+	w.plant = a.db.CreateLocation(t, w.owner)
+	w.lot = a.db.CommissionLot(t, w.owner, a.db.CreateProduct(t, w.owner), w.plant, 500)
+	w.store = a.db.CreateLocation(t, w.consignee)
+	w.ownerSession, _ = a.login(w.owner.Admin.Email, tenancytest.FixturePassword)
+	w.carrierSession, _ = a.login(w.carrier.Admin.Email, tenancytest.FixturePassword)
+	w.consigneeSession, _ = a.login(w.consignee.Admin.Email, tenancytest.FixturePassword)
+	driver := a.db.CreateUser(t, w.carrier.ID, "DRIVER")
+	w.driverID = driver.ID.String()
+	w.driverSession, _ = a.login(driver.Email, tenancytest.FixturePassword)
+	return w
+}
+
+type shipmentBody struct {
+	ID               string  `json:"id"`
+	SSCC             string  `json:"sscc"`
+	Status           string  `json:"status"`
+	AssignedDriverID *string `json:"assigned_driver_id"`
+	Participants     []struct {
+		Role       string `json:"role"`
+		TenantCode string `json:"tenant_code"`
+	} `json:"participants"`
+}
+
+func (a *api) createShipment(w shipmentWorld, quantity int) (shipmentBody, response) {
+	a.t.Helper()
+	var created shipmentBody
+	resp := a.do(request{method: http.MethodPost, path: "/api/v1/shipments", token: w.ownerSession.AccessToken, body: map[string]any{
+		"lot_id": w.lot.ID, "quantity": quantity, "origin_location_id": w.plant.ID, "destination_gln": w.store.GLN,
+		"carrier_tenant_code": w.carrier.Code,
+	}}, &created)
+	return created, resp
+}
+
+func TestShipmentCommandsAndReads(t *testing.T) {
+	a := startAPI(t)
+	w := newShipmentWorld(a)
+
+	created, resp := a.createShipment(w, 480)
+	if resp.status != http.StatusCreated || len(created.SSCC) != 18 || created.Status != "CREATED" || len(created.Participants) != 3 ||
+		resp.header.Get("Location") != "/api/v1/shipments/"+created.ID {
+		t.Fatalf("create: status = %d, shipment = %+v", resp.status, created)
+	}
+	var problem httpx.Problem
+	if _, resp := a.createShipment(w, 30); resp.status != http.StatusConflict {
+		t.Errorf("more than the stock: status = %d, want 409", resp.status)
+	}
+	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/shipments", token: w.ownerSession.AccessToken, body: map[string]any{
+		"lot_id": w.lot.ID, "quantity": 1, "origin_location_id": w.plant.ID, "destination_gln": "4006381333931",
+	}}, &problem); resp.status != http.StatusBadRequest || problem.Errors[0].Field != "destination_gln" {
+		t.Errorf("unknown destination: status = %d, problem = %+v", resp.status, problem)
+	}
+
+	var assigned shipmentBody
+	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/shipments/" + created.ID + "/driver", token: w.carrierSession.AccessToken,
+		body: map[string]any{"driver_user_id": w.driverID}}, &assigned); resp.status != http.StatusOK || assigned.AssignedDriverID == nil {
+		t.Fatalf("assign driver: status = %d, shipment = %+v", resp.status, assigned)
+	}
+
+	// The driver sees the assignment; the consignee reads a valid two-event log.
+	var page struct {
+		Items []shipmentBody `json:"items"`
+	}
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/shipments?assigned_to_me=true", token: w.driverSession.AccessToken}, &page); resp.status != http.StatusOK ||
+		len(page.Items) != 1 || page.Items[0].ID != created.ID {
+		t.Errorf("driver assignments: status = %d, page = %+v", resp.status, page)
+	}
+	var events struct {
+		Items []struct {
+			EventType string `json:"event_type"`
+			Sequence  int    `json:"sequence"`
+			EventHash string `json:"event_hash"`
+		} `json:"items"`
+	}
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/shipments/" + created.ID + "/events", token: w.consigneeSession.AccessToken}, &events); resp.status != http.StatusOK ||
+		len(events.Items) != 2 || events.Items[1].EventType != "shipment.driver_assigned" {
+		t.Errorf("events: status = %d, page = %+v", resp.status, events)
+	}
+	var integrity struct {
+		Valid      bool   `json:"valid"`
+		EventCount int    `json:"event_count"`
+		HeadHash   string `json:"head_hash"`
+	}
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/shipments/" + created.ID + "/integrity", token: w.consigneeSession.AccessToken}, &integrity); resp.status != http.StatusOK ||
+		!integrity.Valid || integrity.EventCount != 2 || integrity.HeadHash != events.Items[1].EventHash {
+		t.Errorf("integrity: status = %d, result = %+v", resp.status, integrity)
+	}
+	var summary map[string]int
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/shipments/summary", token: w.ownerSession.AccessToken}, &summary); resp.status != http.StatusOK ||
+		summary["created"] != 1 {
+		t.Errorf("summary: status = %d, summary = %v", resp.status, summary)
+	}
+
+	stranger := a.db.CreateTenant(t)
+	strangerSession, _ := a.login(stranger.Admin.Email, tenancytest.FixturePassword)
+	if resp := a.do(request{method: http.MethodGet, path: "/api/v1/shipments/" + created.ID, token: strangerSession.AccessToken}, &problem); resp.status != http.StatusNotFound {
+		t.Errorf("stranger: status = %d, want 404", resp.status)
+	}
+
+	var cancelled shipmentBody
+	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/shipments/" + created.ID + "/cancel", token: w.ownerSession.AccessToken,
+		body: map[string]any{"reason": "Customer order withdrawn"}}, &cancelled); resp.status != http.StatusOK || cancelled.Status != "CANCELLED" {
+		t.Errorf("cancel: status = %d, shipment = %+v", resp.status, cancelled)
+	}
+	if resp := a.do(request{method: http.MethodPost, path: "/api/v1/shipments/" + created.ID + "/cancel", token: w.ownerSession.AccessToken,
+		body: map[string]any{"reason": "again"}}, &problem); resp.status != http.StatusConflict || problem.Code != "INVALID_STATE_TRANSITION" {
+		t.Errorf("cancel twice: status = %d, problem = %+v", resp.status, problem)
+	}
+}

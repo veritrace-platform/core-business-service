@@ -202,3 +202,42 @@ func TestTenantDataIsolation(t *testing.T) {
 func rows(table string, id any) tenancytest.Rows {
 	return tenancytest.Rows{Table: table, Where: map[string]any{"id": id}}
 }
+
+func TestExtensionDigits(t *testing.T) {
+	db := tenancytest.Start(t)
+	store := tenant.NewStore(db.App, db.Tenancy)
+	owner, consignee := db.CreateTenant(t), db.CreateTenant(t)
+	product := db.CreateProduct(t, owner)
+	lot := db.CommissionLot(t, owner, product, owner.Headquarters, 10)
+	// Fixture SSCCs start with extension digit 9.
+	db.CreateShipment(t, tenancytest.ShipmentSpec{
+		Owner: owner, Carrier: owner, Consignee: consignee, Lot: lot, Origin: owner.Headquarters,
+		Destination: consignee.Headquarters, Quantity: 1,
+	})
+	if _, err := db.Owner.Exec(t.Context(), `UPDATE core.tenants SET sscc_next_serial = 42 WHERE id = $1`, owner.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	err := store.WithTenantTx(t.Context(), owner.ID, func(repo tenant.ProfileRepository) error {
+		for digit, want := range map[int]bool{9: true, 0: false, 5: false} {
+			if used, err := repo.ExtensionDigitUsed(t.Context(), owner.ID, digit); err != nil || used != want {
+				t.Errorf("ExtensionDigitUsed(%d) = %v, %v; want %v", digit, used, err, want)
+			}
+		}
+		same, other := 0, 5
+		if _, err := repo.Update(t.Context(), owner.ID, tenant.ProfilePatch{SSCCExtensionDigit: &same}); err != nil {
+			return err
+		}
+		if _, err := repo.Update(t.Context(), owner.ID, tenant.ProfilePatch{SSCCExtensionDigit: &other}); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var next int
+	if err := db.Owner.QueryRow(t.Context(), `SELECT sscc_next_serial FROM core.tenants WHERE id = $1`, owner.ID).Scan(&next); err != nil || next != 1 {
+		t.Errorf("serial after changing the digit = %d, %v; want a new serial space from 1", next, err)
+	}
+}

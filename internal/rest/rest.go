@@ -19,6 +19,8 @@ const (
 	CodeRefreshTokenInvalid         = "REFRESH_TOKEN_INVALID"
 	CodeIdentifierAlreadyRegistered = "IDENTIFIER_ALREADY_REGISTERED"
 	CodeInvalidGS1Identifier        = "INVALID_GS1_IDENTIFIER"
+	CodeInsufficientStock           = "INSUFFICIENT_STOCK"
+	CodeSSCCSerialExhausted         = "SSCC_SERIAL_EXHAUSTED"
 )
 
 // Field error codes of the core service. The shared codes are in httpx; GS1 keys use the gs1 reasons.

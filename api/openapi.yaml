@@ -32,6 +32,10 @@ tags:
     description: Lots that the caller's tenant commissioned or holds stock of.
   - name: Inventory
     description: Stock balances at the caller's locations.
+  - name: Shipments
+    description: |
+      Shipments that the caller's tenant takes part in, as owner, carrier, or consignee: creation, carrier and driver
+      assignment, cancellation, and the hash-chained event log. Drivers see only the shipments assigned to them.
   - name: Directory
     description: |
       Public entries of every tenant: active locations by GLN, to pick a shipment destination or confirm a
@@ -1029,6 +1033,346 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/shipments:
+    get:
+      operationId: listShipments
+      tags: [Shipments]
+      summary: List shipments
+      description: |
+        Newest first: the shipments in which the caller's tenant takes part. A `DRIVER` sees only the shipments assigned
+        to it, whatever the filters say.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/ShipmentStatus"
+        - name: party
+          in: query
+          description: Keeps the shipments in which the caller's tenant has this role.
+          schema:
+            $ref: "#/components/schemas/ParticipantRole"
+        - name: sscc
+          in: query
+          description: A scanned SSCC; a malformed one answers `422 INVALID_GS1_IDENTIFIER`.
+          schema:
+            type: string
+            pattern: "^[0-9]{18}$"
+        - name: lot_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: assigned_to_me
+          in: query
+          description: Keeps the shipments assigned to the caller as driver.
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: A page of shipments.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShipmentPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: createShipment
+      tags: [Shipments]
+      summary: Create a shipment
+      description: |
+        `ADMIN` and `WAREHOUSE_MANAGER` of a tenant that holds the lot. In one transaction the service issues the
+        SSCC, copies the product, lot, origin, and destination fields onto the shipment, records the participants
+        (`OWNER` the caller's tenant, `CARRIER` the carrier or the owner itself, `CONSIGNEE` the tenant of the
+        destination GLN), takes the quantity from the origin balance, and appends `shipment.created`.
+
+        The lot, origin, destination, carrier, and driver must be usable: a lot the tenant does not hold, an origin
+        that is not one of its active locations, a destination GLN that the directory does not list or that equals
+        the origin, an unknown carrier code, or a driver who is not an active driver of the tenant answers `400`
+        with `INVALID_VALUE` on that field. A driver can be set only when the owner carries the goods itself. A
+        recalled lot answers `409 LOT_RECALLED`, an origin balance below the quantity `409 INSUFFICIENT_STOCK`, and
+        an exhausted serial space `409 SSCC_SERIAL_EXHAUSTED`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShipmentCreateRequest"
+            example:
+              lot_id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d95
+              quantity: 480
+              origin_location_id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d92
+              destination_gln: "8934567000017"
+              carrier_tenant_code: MEKONG_LOGISTICS
+      responses:
+        "201":
+          description: The shipment is created. `Location` points to it.
+          headers:
+            Location:
+              schema:
+                type: string
+                example: /api/v1/shipments/0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7da0
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shipment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/shipments/summary:
+    get:
+      operationId: getShipmentSummary
+      tags: [Shipments]
+      summary: Count shipments by status
+      description: The shipments that `GET /api/v1/shipments` would list, counted by status.
+      responses:
+        "200":
+          description: The counts.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShipmentSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/shipments/{shipment_id}:
+    parameters:
+      - $ref: "#/components/parameters/ShipmentID"
+    get:
+      operationId: getShipment
+      tags: [Shipments]
+      summary: Read a shipment
+      description: |
+        Any participant. A `DRIVER` of the carrier reads only the shipments assigned to it (403 otherwise); other
+        tenants get 404.
+      responses:
+        "200":
+          description: The shipment.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shipment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/shipments/{shipment_id}/carrier:
+    parameters:
+      - $ref: "#/components/parameters/ShipmentID"
+    post:
+      operationId: assignCarrier
+      tags: [Shipments]
+      summary: Assign a carrier
+      description: |
+        `ADMIN` and `WAREHOUSE_MANAGER` of the owner, while the shipment is `CREATED` and the owner still carries it
+        itself; otherwise `409 INVALID_STATE_TRANSITION`. The carrier replaces the owner as `CARRIER`, the owner's
+        driver is released, and `shipment.participant_added` is appended.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CarrierAssignment"
+      responses:
+        "200":
+          $ref: "#/components/responses/UpdatedShipment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/shipments/{shipment_id}/driver:
+    parameters:
+      - $ref: "#/components/parameters/ShipmentID"
+    post:
+      operationId: assignDriver
+      tags: [Shipments]
+      summary: Assign or replace the driver
+      description: |
+        `ADMIN` and `WAREHOUSE_MANAGER` of the carrier, while the shipment is `CREATED`. The driver must be an active
+        `DRIVER` of the carrier. Appends `shipment.driver_assigned`; assigning the driver already assigned changes
+        nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DriverAssignment"
+      responses:
+        "200":
+          $ref: "#/components/responses/UpdatedShipment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/shipments/{shipment_id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/ShipmentID"
+    post:
+      operationId: cancelShipment
+      tags: [Shipments]
+      summary: Cancel a shipment
+      description: |
+        `ADMIN` and `WAREHOUSE_MANAGER` of the owner, while the shipment is `CREATED`. The quantity returns to the
+        origin balance, the SSCC is never reused, and `shipment.cancelled` records the reason.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Cancellation"
+            example:
+              reason: Customer order withdrawn
+      responses:
+        "200":
+          $ref: "#/components/responses/UpdatedShipment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/shipments/{shipment_id}/events:
+    parameters:
+      - $ref: "#/components/parameters/ShipmentID"
+    get:
+      operationId: listShipmentEvents
+      tags: [Shipments]
+      summary: Read the event log
+      description: |
+        Oldest first, with the hashes that chain the events (ADR-0006). Each item carries every member that its hash
+        covers, so a client can recompute the chain itself (see `docs/contracts/messaging.md` §2.1).
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: A page of events.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShipmentEventPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/shipments/{shipment_id}/integrity:
+    parameters:
+      - $ref: "#/components/parameters/ShipmentID"
+    get:
+      operationId: verifyShipmentIntegrity
+      tags: [Shipments]
+      summary: Verify the event log
+      description: |
+        Recomputes the hash chain: every event must have the next sequence number, link to the hash of the event
+        before it, and hash to its stored hash. A rewritten, removed, or reordered event breaks the chain at
+        `first_invalid_sequence`.
+      responses:
+        "200":
+          description: The result.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Integrity"
+              example:
+                valid: true
+                event_count: 3
+                head_hash: b950012d685ecf3e7f7ccf416581645cd8a0e61070e08d7c11fc1448d9212435
+                first_invalid_sequence: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/directory/locations/{gln}:
     parameters:
       - name: gln
@@ -1132,6 +1476,13 @@ components:
       description: Opaque cursor from a previous page's `next_cursor`.
       schema:
         type: string
+    ShipmentID:
+      name: shipment_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
   headers:
     TraceId:
       description: Trace ID of the request, for support and log correlation.
@@ -1616,6 +1967,304 @@ components:
         next_cursor:
           type: [string, "null"]
           description: Pass as `cursor` to read the next page; `null` on the last page.
+    ShipmentStatus:
+      type: string
+      description: See docs/domain/shipment-lifecycle.md §3.
+      enum: [CREATED, IN_TRANSIT, DELIVERED, CANCELLED, RECALLED]
+    ParticipantRole:
+      type: string
+      description: A tenant's part in a shipment. `INSPECTOR` arrives in M2.
+      enum: [OWNER, CARRIER, CONSIGNEE, INSPECTOR]
+    Participant:
+      type: object
+      description: A tenant involved in the shipment, with its directory fields as they were when it joined.
+      required: [tenant_id, role, tenant_code, legal_name]
+      properties:
+        tenant_id:
+          type: string
+          format: uuid
+        role:
+          $ref: "#/components/schemas/ParticipantRole"
+        tenant_code:
+          type: string
+        legal_name:
+          type: string
+    Facility:
+      type: object
+      description: The origin or destination as it was when the shipment was created.
+      required: [location_id, gln, name, latitude, longitude, geo_fence_radius_meters]
+      properties:
+        location_id:
+          type: string
+          format: uuid
+        gln:
+          type: string
+          pattern: "^[0-9]{13}$"
+        name:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+        geo_fence_radius_meters:
+          type: integer
+    Shipment:
+      type: object
+      description: |
+        A quantity of one lot moving as one logistic unit, identified by its SSCC. The product, lot, origin, and
+        destination fields are snapshots taken when the shipment was created.
+      required:
+        - id
+        - sscc
+        - status
+        - quantity
+        - lot
+        - product
+        - origin
+        - destination
+        - owner_tenant_id
+        - carrier_tenant_id
+        - consignee_tenant_id
+        - assigned_driver_id
+        - participants
+        - picked_up_at
+        - delivered_at
+        - cancelled_at
+        - recalled_at
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        sscc:
+          type: string
+          pattern: "^[0-9]{18}$"
+        status:
+          $ref: "#/components/schemas/ShipmentStatus"
+        quantity:
+          type: integer
+          minimum: 1
+        lot:
+          type: object
+          required: [id, lot_number, expiration_date]
+          properties:
+            id:
+              type: string
+              format: uuid
+            lot_number:
+              $ref: "#/components/schemas/LotNumber"
+            expiration_date:
+              type: string
+              format: date
+        product:
+          type: object
+          required: [gtin, name, min_temp_celsius, max_temp_celsius]
+          properties:
+            gtin:
+              type: string
+              pattern: "^[0-9]{14}$"
+            name:
+              type: string
+            min_temp_celsius:
+              $ref: "#/components/schemas/Temperature"
+            max_temp_celsius:
+              $ref: "#/components/schemas/Temperature"
+        origin:
+          $ref: "#/components/schemas/Facility"
+        destination:
+          $ref: "#/components/schemas/Facility"
+        owner_tenant_id:
+          type: string
+          format: uuid
+        carrier_tenant_id:
+          type: string
+          format: uuid
+        consignee_tenant_id:
+          type: string
+          format: uuid
+        assigned_driver_id:
+          type: [string, "null"]
+          format: uuid
+          description: A user of the carrier.
+        participants:
+          type: array
+          items:
+            $ref: "#/components/schemas/Participant"
+        picked_up_at:
+          type: [string, "null"]
+          format: date-time
+        delivered_at:
+          type: [string, "null"]
+          format: date-time
+        cancelled_at:
+          type: [string, "null"]
+          format: date-time
+        recalled_at:
+          type: [string, "null"]
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ShipmentPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Shipment"
+        next_cursor:
+          type: [string, "null"]
+          description: Pass as `cursor` to read the next page; `null` on the last page.
+    ShipmentCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [lot_id, quantity, origin_location_id, destination_gln]
+      properties:
+        lot_id:
+          type: string
+          format: uuid
+          description: A lot that the caller's tenant owns or holds.
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 2147483647
+        origin_location_id:
+          type: string
+          format: uuid
+          description: An active location of the caller's tenant that holds at least the quantity of the lot.
+        destination_gln:
+          type: string
+          pattern: "^[0-9]{13}$"
+          description: An active location of any tenant, as the directory lists it; not the origin.
+        carrier_tenant_code:
+          type: [string, "null"]
+          description: The carrier's tenant code, matched ignoring case. Omitted, the owner carries the goods itself.
+        driver_user_id:
+          type: [string, "null"]
+          format: uuid
+          description: One of the owner's active drivers, when the owner carries the goods itself.
+    CarrierAssignment:
+      type: object
+      additionalProperties: false
+      required: [carrier_tenant_code]
+      properties:
+        carrier_tenant_code:
+          type: string
+          description: Another tenant's code, matched ignoring case.
+    DriverAssignment:
+      type: object
+      additionalProperties: false
+      required: [driver_user_id]
+      properties:
+        driver_user_id:
+          type: string
+          format: uuid
+    Cancellation:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 1000
+    ShipmentSummary:
+      type: object
+      required: [created, in_transit, delivered, cancelled, recalled]
+      properties:
+        created:
+          type: integer
+        in_transit:
+          type: integer
+        delivered:
+          type: integer
+        cancelled:
+          type: integer
+        recalled:
+          type: integer
+    ShipmentEvent:
+      type: object
+      description: |
+        One entry of a shipment's log. `event_hash` is the SHA-256, in lowercase hex, of the RFC 8785 canonical
+        JSON of every other member; `prev_event_hash` is the hash of the event before, or 64 zeros.
+      required: [event_id, event_type, event_version, occurred_at, subject, actor, sequence, prev_event_hash, event_hash, data]
+      properties:
+        event_id:
+          type: string
+          format: uuid
+        event_type:
+          type: string
+          example: shipment.driver_assigned
+        event_version:
+          type: integer
+        occurred_at:
+          type: string
+          format: date-time
+          description: UTC with exactly six fractional digits, as hashed.
+          example: "2026-10-02T08:05:30.250000Z"
+        subject:
+          type: object
+          required: [shipment_id, sscc, status]
+          properties:
+            shipment_id:
+              type: string
+              format: uuid
+            sscc:
+              type: string
+            status:
+              $ref: "#/components/schemas/ShipmentStatus"
+        actor:
+          type: [object, "null"]
+          required: [tenant_id, user_id]
+          properties:
+            tenant_id:
+              type: string
+              format: uuid
+            user_id:
+              type: string
+              format: uuid
+        sequence:
+          type: integer
+          minimum: 1
+        prev_event_hash:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        event_hash:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        data:
+          type: object
+          description: The payload of the event type (docs/contracts/messaging.md §3).
+    ShipmentEventPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ShipmentEvent"
+        next_cursor:
+          type: [string, "null"]
+          description: Pass as `cursor` to read the next page; `null` on the last page.
+    Integrity:
+      type: object
+      required: [valid, event_count, head_hash, first_invalid_sequence]
+      properties:
+        valid:
+          type: boolean
+        event_count:
+          type: integer
+        head_hash:
+          type: [string, "null"]
+          description: The stored hash of the last event.
+        first_invalid_sequence:
+          type: [integer, "null"]
+          description: The first position where the chain breaks; `null` when it is valid.
     DirectoryTenant:
       type: object
       description: The public entry of an active tenant.
@@ -1938,6 +2587,15 @@ components:
           type: number
           minimum: 0
   responses:
+    UpdatedShipment:
+      description: The shipment after the command.
+      headers:
+        X-Trace-Id:
+          $ref: "#/components/headers/TraceId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Shipment"
     Session:
       description: Signed in. The response must not be cached.
       headers:

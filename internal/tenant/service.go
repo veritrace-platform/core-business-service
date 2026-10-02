@@ -25,6 +25,8 @@ type ProfileRepository interface {
 	// Get returns ErrNotFound when the tenant is not visible.
 	Get(ctx context.Context, id uuid.UUID) (Tenant, error)
 	Update(ctx context.Context, id uuid.UUID, p ProfilePatch) (Tenant, error)
+	// ExtensionDigitUsed reports whether any of the tenant's SSCCs starts with the digit.
+	ExtensionDigitUsed(ctx context.Context, id uuid.UUID, digit int) (bool, error)
 }
 
 // PasswordHasher hashes a new password.
@@ -72,13 +74,29 @@ func (s *Service) Profile(ctx context.Context, p identity.Principal) (Tenant, er
 	return t, err
 }
 
-// UpdateProfile changes the caller's tenant.
+// UpdateProfile changes the caller's tenant. A new SSCC extension digit starts a new serial space, so it must
+// not be one that issued SSCCs before.
 func (s *Service) UpdateProfile(ctx context.Context, p identity.Principal, patch ProfilePatch) (Tenant, error) {
 	if err := authorizeProfile(p); err != nil {
 		return Tenant{}, err
 	}
 	var t Tenant
 	err := s.profiles.WithTenantTx(ctx, p.TenantID, func(repo ProfileRepository) error {
+		if digit := patch.SSCCExtensionDigit; digit != nil {
+			current, err := repo.Get(ctx, p.TenantID)
+			if err != nil {
+				return err
+			}
+			if *digit != current.SSCCExtensionDigit {
+				used, err := repo.ExtensionDigitUsed(ctx, p.TenantID, *digit)
+				if err != nil {
+					return err
+				}
+				if used {
+					return ErrExtensionDigitUsed
+				}
+			}
+		}
 		var err error
 		t, err = repo.Update(ctx, p.TenantID, patch)
 		return err
