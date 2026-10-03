@@ -297,7 +297,7 @@ func (s *Service) RecordCheckpoint(ctx context.Context, p identity.Principal, id
 		}
 		return repo.AppendEvent(ctx, event.New{
 			ShipmentID: id, SSCC: sh.SSCC, Status: sh.Status, Type: event.TypeCheckpointRecorded, Actor: actor(p),
-			OccurredAt: s.now(),
+			OccurredAt: s.now().UTC(),
 			Data: checkpointData{
 				Facility: facilityName{GLN: facility.GLN, Name: facility.Name}, Position: cp.Position, DistanceMeters: distance,
 			},

@@ -495,8 +495,11 @@ func (s *Service) Integrity(ctx context.Context, p identity.Principal, id uuid.U
 			return err
 		}
 		events, err := repo.AllEvents(ctx, id)
+		if err != nil {
+			return err
+		}
 		result = event.Verify(events)
-		return err
+		return nil
 	})
 	return result, err
 }
