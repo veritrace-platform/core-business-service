@@ -22,7 +22,7 @@ Platform documentation, including the architecture, domain rules, contracts, and
 ```bash
 cp .env.example .env
 make migrate-up     # create or upgrade the schema (owner role)
-make run            # API on :8080, admin on :8081
+make run            # API on :8080, admin on :8081, and the outbox relay to Kafka
 ```
 
 Requests normally go through the gateway on `http://localhost:8000`.
@@ -33,7 +33,7 @@ The binary exposes these subcommands:
 
 | Command | Purpose |
 | --- | --- |
-| `serve` | Run the REST API and the admin server |
+| `serve` | Run the REST API, the admin server, and the outbox relay |
 | `migrate up\|down\|status` | Manage the database schema |
 | `healthcheck` | Probe the admin server (used by container health checks) |
 | `version` | Print the build version |
@@ -52,6 +52,8 @@ The binary exposes these subcommands:
 | `JWT_SIGNING_KEYS` | — | Access token signing keys: comma-separated `<kid>:<base64 of 32 random bytes>` (`openssl rand -base64 32`). The first key signs; all are published in the JWKS, so add the new key first and drop the old one after 15 minutes. |
 | `REFRESH_TOKEN_TTL` | `168h` | Refresh token lifetime; every refresh starts a new period (minimum `1h`) |
 | `TRUSTED_PROXIES` | loopback and private ranges | CIDR ranges whose `X-Forwarded-For` names the client address for rate limits |
+| `PICKUP_CODE_PEPPER` | — | Key of the pickup code HMAC: base64 of at least 32 random bytes (`openssl rand -base64 32`). Changing it voids every active pickup code. |
+| `KAFKA_BROKERS` | — | Kafka bootstrap brokers of the outbox relay, comma-separated |
 
 ## Project layout
 
@@ -82,14 +84,27 @@ PostgreSQL row-level security limits every query to the rows the caller's tenant
 - `migrations/conventions_integration_test.go` checks every migration against the
   [schema conventions](https://github.com/veritrace-platform/veritrace/blob/main/docs/architecture/data-model.md#36-row-level-security-policies).
 
+## Event log and outbox
+
+Every shipment state change appends an event to the shipment's hash chain and an outbox message, in the
+transaction of the change ([ADR-0005](https://github.com/veritrace-platform/veritrace/blob/main/docs/adr/0005-transactional-outbox-for-domain-events.md),
+[ADR-0006](https://github.com/veritrace-platform/veritrace/blob/main/docs/adr/0006-tamper-evident-event-hashing.md)).
+
+- An event's hash is the SHA-256 of its RFC 8785 canonical JSON, which includes the hash of the event before it
+  (`internal/canonicaljson`, `internal/event`). The shared test vectors are copied into their `testdata`.
+- The relay that `serve` runs publishes pending messages to Kafka topic `shipment.events` in order, keyed by SSCC,
+  at least once, and purges published messages after 7 days (`internal/outbox`). Several instances take turns.
+- `GET /api/v1/shipments/{id}/integrity` recomputes a shipment's chain and names the first event that breaks it.
+
 ## Development
 
 ```bash
 make test               # unit tests
-make test-integration   # unit + integration tests (Docker)
+make test-integration   # unit + integration tests (Docker: PostgreSQL with TimescaleDB, Kafka)
 make generate           # regenerate query code after editing SQL (sqlc, in Docker)
 make lint               # golangci-lint
 make openapi-lint       # validate api/openapi.yaml
+make check              # what CI checks: lint, generated code, OpenAPI, all tests
 make help               # all targets
 ```
 

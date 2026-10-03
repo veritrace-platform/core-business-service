@@ -132,24 +132,6 @@ func TestValidateCompanyPrefix(t *testing.T) {
 	}
 }
 
-func TestPrefixesOverlap(t *testing.T) {
-	tests := []struct {
-		a, b string
-		want bool
-	}{
-		{"8930001", "8930001", true},
-		{"893000", "8930001", true},
-		{"8930001", "893000", true},
-		{"8930001", "8930002", false},
-		{"8934567", "893456", true},
-	}
-	for _, tt := range tests {
-		if got := gs1.PrefixesOverlap(tt.a, tt.b); got != tt.want {
-			t.Errorf("PrefixesOverlap(%s, %s) = %t, want %t", tt.a, tt.b, got, tt.want)
-		}
-	}
-}
-
 func TestValidateLotNumber(t *testing.T) {
 	for lot, valid := range map[string]bool{
 		"L2026-09.A_1": true, "1": true, strings.Repeat("9", 20): true,

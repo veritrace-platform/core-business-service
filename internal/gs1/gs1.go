@@ -126,12 +126,6 @@ func ValidateCompanyPrefix(gcp string) error {
 	return nil
 }
 
-// PrefixesOverlap reports whether one company prefix starts with the other. GS1 assigns prefixes so that none
-// extends another; overlapping prefixes would let two companies claim the same keys.
-func PrefixesOverlap(a, b string) bool {
-	return strings.HasPrefix(a, b) || strings.HasPrefix(b, a)
-}
-
 var lotNumberPattern = regexp.MustCompile(`^[0-9A-Za-z._-]{1,20}$`)
 
 // ErrInvalidLotNumber reports a lot number outside the URL-safe subset of GS1 AI 10.

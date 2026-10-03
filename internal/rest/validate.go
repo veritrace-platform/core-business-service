@@ -109,10 +109,10 @@ func (v *Validator) Phone(field string, value **string) bool {
 func (v *Validator) Password(field, value string) bool {
 	switch err := password.Validate(value); {
 	case errors.Is(err, password.ErrTooShort):
-		v.Add(field, httpx.FieldTooShort, err.Error())
+		v.Add(field, httpx.FieldTooShort, fmt.Sprintf("must be at least %d characters", password.MinLength))
 		return false
 	case errors.Is(err, password.ErrTooLong):
-		v.Add(field, httpx.FieldTooLong, err.Error())
+		v.Add(field, httpx.FieldTooLong, fmt.Sprintf("must be at most %d characters", password.MaxLength))
 		return false
 	}
 	return true
