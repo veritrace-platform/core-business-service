@@ -1,0 +1,141 @@
+{
+  "description": "JSON Canonicalization Scheme (RFC 8785) vectors for every implementation that hashes shipment events or telemetry incidents (docs/adr/0006-tamper-evident-event-hashing.md). Numbers are ECMAScript number serializations of IEEE 754 doubles, given by their bit pattern in hex; invalid_numbers must be rejected. Each document gives JSON text, its canonical form, and the SHA-256 of the canonical UTF-8 bytes. The expected values come from an independent ECMAScript implementation: JSON.stringify for primitives, with object keys sorted by UTF-16 code units.",
+  "numbers": [
+    {
+      "ieee754": "0000000000000000",
+      "canonical": "0"
+    },
+    {
+      "ieee754": "8000000000000000",
+      "canonical": "0"
+    },
+    {
+      "ieee754": "0000000000000001",
+      "canonical": "5e-324"
+    },
+    {
+      "ieee754": "8000000000000001",
+      "canonical": "-5e-324"
+    },
+    {
+      "ieee754": "7fefffffffffffff",
+      "canonical": "1.7976931348623157e+308"
+    },
+    {
+      "ieee754": "ffefffffffffffff",
+      "canonical": "-1.7976931348623157e+308"
+    },
+    {
+      "ieee754": "4340000000000000",
+      "canonical": "9007199254740992"
+    },
+    {
+      "ieee754": "c340000000000000",
+      "canonical": "-9007199254740992"
+    },
+    {
+      "ieee754": "4430000000000000",
+      "canonical": "295147905179352830000"
+    },
+    {
+      "ieee754": "44b52d02c7e14af5",
+      "canonical": "9.999999999999997e+22"
+    },
+    {
+      "ieee754": "44b52d02c7e14af6",
+      "canonical": "1e+23"
+    },
+    {
+      "ieee754": "44b52d02c7e14af7",
+      "canonical": "1.0000000000000001e+23"
+    },
+    {
+      "ieee754": "444b1ae4d6e2ef4e",
+      "canonical": "999999999999999700000"
+    },
+    {
+      "ieee754": "444b1ae4d6e2ef4f",
+      "canonical": "999999999999999900000"
+    },
+    {
+      "ieee754": "444b1ae4d6e2ef50",
+      "canonical": "1e+21"
+    },
+    {
+      "ieee754": "3eb0c6f7a0b5ed8c",
+      "canonical": "9.999999999999997e-7"
+    },
+    {
+      "ieee754": "3eb0c6f7a0b5ed8d",
+      "canonical": "0.000001"
+    },
+    {
+      "ieee754": "41b3de4355555553",
+      "canonical": "333333333.3333332"
+    },
+    {
+      "ieee754": "41b3de4355555554",
+      "canonical": "333333333.33333325"
+    },
+    {
+      "ieee754": "41b3de4355555555",
+      "canonical": "333333333.3333333"
+    },
+    {
+      "ieee754": "41b3de4355555556",
+      "canonical": "333333333.3333334"
+    },
+    {
+      "ieee754": "41b3de4355555557",
+      "canonical": "333333333.33333343"
+    },
+    {
+      "ieee754": "becbf647612f3696",
+      "canonical": "-0.0000033333333333333333"
+    },
+    {
+      "ieee754": "43143ff3c1cb0959",
+      "canonical": "1424953923781206.2"
+    }
+  ],
+  "invalid_numbers": [
+    {
+      "ieee754": "7fffffffffffffff",
+      "note": "NaN"
+    },
+    {
+      "ieee754": "7ff0000000000000",
+      "note": "Infinity"
+    },
+    {
+      "ieee754": "fff0000000000000",
+      "note": "-Infinity"
+    }
+  ],
+  "documents": [
+    {
+      "name": "RFC 8785 section 3.2.2 example",
+      "input": "{\n  \"numbers\": [333333333.33333329, 1E30, 4.50, 2e-3, 0.000000000000000000000000001],\n  \"string\": \"\\u20ac$\\u000F\\u000aA'\\u0042\\u0022\\u005c\\\\\\\"\\/\",\n  \"literals\": [null, true, false]\n}",
+      "canonical": "{\"literals\":[null,true,false],\"numbers\":[333333333.3333333,1e+30,4.5,0.002,1e-27],\"string\":\"€$\\u000f\\nA'B\\\"\\\\\\\\\\\"/\"}",
+      "sha256": "2d5e01a318d0f0879ab568c4be289c8b1f64ef8921a53c6277d5e069978baacb"
+    },
+    {
+      "name": "RFC 8785 section 3.2.3 property sorting",
+      "input": "{\n  \"\\u20ac\": \"Euro Sign\",\n  \"\\r\": \"Carriage Return\",\n  \"\\ufb33\": \"Hebrew Letter Dalet With Dagesh\",\n  \"1\": \"One\",\n  \"\\ud83d\\ude00\": \"Emoji: Grinning Face\",\n  \"\\u0080\": \"Control\",\n  \"\\u00f6\": \"Latin Small Letter O With Diaeresis\"\n}",
+      "canonical": "{\"\\r\":\"Carriage Return\",\"1\":\"One\",\"\u0080\":\"Control\",\"ö\":\"Latin Small Letter O With Diaeresis\",\"€\":\"Euro Sign\",\"😀\":\"Emoji: Grinning Face\",\"דּ\":\"Hebrew Letter Dalet With Dagesh\"}",
+      "sha256": "5e321556d22018a9656991a9e94f77ec175fa193e52a2429d312f8419ec8b08c"
+    },
+    {
+      "name": "nested objects, empty containers, and control characters",
+      "input": "{\"b\":[{\"z\":1,\"a\":[]},{}],\"a\":{\"y\":\"tab\\there\",\"x\":\"\\u0001\\u001f\\u007f <>&\\u2028\"},\"c\":-0.0}",
+      "canonical": "{\"a\":{\"x\":\"\\u0001\\u001f\u007f <>&\u2028\",\"y\":\"tab\\there\"},\"b\":[{\"a\":[],\"z\":1},{}],\"c\":0}",
+      "sha256": "f67f9b57a1923cab3fba323d6c6e3454ab106d688ec1c7f1f1678ea444ae96b2"
+    },
+    {
+      "name": "Vietnamese text and coordinates",
+      "input": "{\"name\":\"Kho lạnh Tân Thuận\",\"position\":{\"longitude\":106.7428010,\"latitude\":10.762622,\"accuracy_meters\":12.0},\"distance_meters\":18.40}",
+      "canonical": "{\"distance_meters\":18.4,\"name\":\"Kho lạnh Tân Thuận\",\"position\":{\"accuracy_meters\":12,\"latitude\":10.762622,\"longitude\":106.742801}}",
+      "sha256": "3a4e429ed1cdf6ced0447d122bd5599ebbb223d923e5cb0c8d6d3fb19e2a3e03"
+    }
+  ]
+}

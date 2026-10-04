@@ -18,7 +18,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 
-	"github.com/veritrace-platform/core-business-service/internal/httpapi"
+	"github.com/veritrace-platform/core-business-service/internal/app"
 	"github.com/veritrace-platform/core-business-service/internal/platform/admin"
 	"github.com/veritrace-platform/core-business-service/internal/platform/buildinfo"
 	"github.com/veritrace-platform/core-business-service/internal/platform/config"
@@ -83,6 +83,13 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if err := cfg.ValidateServe(); err != nil {
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
+	appCfg, err := app.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("invalid configuration: %w", err)
+	}
+	if err := appCfg.Validate(); err != nil {
+		return fmt.Errorf("invalid configuration: %w", err)
+	}
 
 	pool, err := postgres.NewPool(ctx, cfg.DatabaseURL, buildinfo.ServiceName)
 	if err != nil {
@@ -98,9 +105,20 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 
 	readiness := admin.NewReadiness(map[string]admin.Check{"postgres": pool.Ping}, 2*time.Second)
 
+	deps := app.Dependencies{Logger: logger, Registerer: registry, Pool: pool}
+	api, err := app.NewHandler(appCfg, deps)
+	if err != nil {
+		return err
+	}
+	relay, closeRelay, err := app.NewRelay(appCfg, deps)
+	if err != nil {
+		return err
+	}
+	defer closeRelay()
+
 	apiServer := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouter(logger, registry),
+		Handler:           api,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
@@ -114,9 +132,20 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
 	}
 
+	// Events left in the outbox at shutdown are published at the next start.
+	relayCtx, stopRelay := context.WithCancel(ctx)
+	relayDone := make(chan struct{})
+	go func() {
+		defer close(relayDone)
+		relay.Run(relayCtx)
+	}()
+
 	logger.InfoContext(ctx, "starting", slog.String("env", cfg.Env))
-	if err := server.Run(ctx, logger, cfg.ShutdownTimeout, readiness.SetDraining, apiServer, adminServer); err != nil {
-		return err
+	runErr := server.Run(ctx, logger, cfg.ShutdownTimeout, readiness.SetDraining, apiServer, adminServer)
+	stopRelay()
+	<-relayDone
+	if runErr != nil {
+		return runErr
 	}
 	logger.InfoContext(ctx, "stopped")
 	return nil

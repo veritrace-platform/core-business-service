@@ -15,8 +15,1675 @@ servers:
     description: Local gateway
 security:
   - bearerAuth: []
-tags: []
-paths: {}
+tags:
+  - name: Tenants
+    description: Tenant registration and the tenant profile.
+  - name: Authentication
+    description: |
+      Sign-in, token refresh, sign-out, and token verification keys (ADR-0007). Browsers reach these endpoints
+      through the frontend's session routes (ADR-0021), which keep the refresh token in an `HttpOnly` cookie.
+  - name: Account
+    description: The signed-in user's own account.
+  - name: Users
+    description: The users of the caller's tenant.
+  - name: Catalog
+    description: The locations and products of the caller's tenant.
+  - name: Lots
+    description: Lots that the caller's tenant commissioned or holds stock of.
+  - name: Inventory
+    description: Stock balances at the caller's locations.
+  - name: Shipments
+    description: |
+      Shipments that the caller's tenant takes part in, as owner, carrier, or consignee: creation, carrier and driver
+      assignment, cancellation, and the hash-chained event log. Drivers see only the shipments assigned to them.
+  - name: Directory
+    description: |
+      Public entries of every tenant: active locations by GLN, to pick a shipment destination or confirm a
+      checkpoint facility, and active tenants by code, to pick a carrier.
+paths:
+  /api/v1/tenants:
+    post:
+      operationId: registerTenant
+      tags: [Tenants]
+      summary: Register a tenant
+      description: |
+        Creates a tenant with its headquarters location and first admin user, who gets the `ADMIN` role.
+        Public, and limited to 10 requests per minute per client address.
+
+        The headquarters GLN must start with the GS1 company prefix. The prefix must not equal, extend, or be
+        extended by a registered prefix; such a prefix is rejected with `409 IDENTIFIER_ALREADY_REGISTERED` on
+        `tenant.gs1_company_prefix`. Text fields are trimmed.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantRegistrationRequest"
+            example:
+              tenant:
+                code: SGFRESH
+                legal_name: Saigon Fresh Foods Joint Stock Company
+                tax_code: "0312345678"
+                gs1_company_prefix: "8930001"
+              headquarters:
+                gln: "8930001001015"
+                name: Saigon Fresh Foods headquarters
+                address: 12 Nguyen Hue Boulevard, Ben Nghe Ward
+                city: Ho Chi Minh City
+                latitude: 10.773547
+                longitude: 106.703945
+                geo_fence_radius_meters: 200
+              admin:
+                email: admin@sgfresh.example
+                password: correct-horse-battery
+                full_name: Nguyen Van An
+                phone: "+84 28 3822 1234"
+      responses:
+        "201":
+          description: The tenant is registered. `Location` points to the tenant profile.
+          headers:
+            Location:
+              description: Path of the tenant profile.
+              schema:
+                type: string
+                example: /api/v1/tenant
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantRegistration"
+              example:
+                tenant:
+                  id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d8e
+                  code: SGFRESH
+                  legal_name: Saigon Fresh Foods Joint Stock Company
+                  tax_code: "0312345678"
+                  gs1_company_prefix: "8930001"
+                  sscc_extension_digit: 0
+                  status: ACTIVE
+                  created_at: "2026-09-30T08:00:00.123456Z"
+                  updated_at: "2026-09-30T08:00:00.123456Z"
+                headquarters:
+                  id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d8f
+                  gln: "8930001001015"
+                  name: Saigon Fresh Foods headquarters
+                  address: 12 Nguyen Hue Boulevard, Ben Nghe Ward
+                  city: Ho Chi Minh City
+                  country_code: VN
+                  latitude: 10.773547
+                  longitude: 106.703945
+                  geo_fence_radius_meters: 200
+                  is_headquarters: true
+                  is_active: true
+                  created_at: "2026-09-30T08:00:00.123456Z"
+                  updated_at: "2026-09-30T08:00:00.123456Z"
+                admin:
+                  id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d90
+                  email: admin@sgfresh.example
+                  full_name: Nguyen Van An
+                  phone: "+84 28 3822 1234"
+                  role: ADMIN
+                  is_active: true
+                  last_login_at: null
+                  created_at: "2026-09-30T08:00:00.123456Z"
+                  updated_at: "2026-09-30T08:00:00.123456Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/auth/login:
+    post:
+      operationId: login
+      tags: [Authentication]
+      summary: Sign in
+      description: |
+        Checks the email (case-insensitive) and password and starts a session. Public, and limited to 10
+        requests per minute per client address. The same `INVALID_CREDENTIALS` answers an unknown email, a wrong
+        password, a deactivated user, and a suspended tenant.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+            example:
+              email: admin@sgfresh.example
+              password: correct-horse-battery
+      responses:
+        "200":
+          $ref: "#/components/responses/Session"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/auth/refresh:
+    post:
+      operationId: refreshSession
+      tags: [Authentication]
+      summary: Rotate the refresh token
+      description: |
+        Exchanges a refresh token for a new access token and a new refresh token; the presented token stops
+        working. Presenting a rotated token again revokes every token of its session family. Unknown, expired,
+        revoked, and reused tokens, and tokens of users who may no longer sign in, answer
+        `401 REFRESH_TOKEN_INVALID`. Clients coalesce concurrent refreshes into one request.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshTokenRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/Session"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/auth/logout:
+    post:
+      operationId: logout
+      tags: [Authentication]
+      summary: Sign out
+      description: |
+        Revokes the session family of a refresh token. Unknown and already revoked tokens also answer 204, so
+        signing out is idempotent. Access tokens stay valid until they expire (at most 15 minutes).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshTokenRequest"
+      responses:
+        "204":
+          description: Signed out.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /.well-known/jwks.json:
+    get:
+      operationId: getJwks
+      tags: [Authentication]
+      summary: Token verification keys
+      description: |
+        Ed25519 public keys that verify access tokens. Tokens name their key in the `kid` header. During a key
+        rotation the set lists both keys. Cacheable for five minutes.
+      security: []
+      responses:
+        "200":
+          description: The JSON Web Key Set.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: public, max-age=300
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JWKS"
+              example:
+                keys:
+                  - kty: OKP
+                    crv: Ed25519
+                    kid: "2026-09"
+                    x: 11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo
+                    alg: EdDSA
+                    use: sig
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/me:
+    get:
+      operationId: getMe
+      tags: [Account]
+      summary: The signed-in user
+      description: The user of the access token, with a summary of its tenant.
+      responses:
+        "200":
+          description: The signed-in user.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/me/password:
+    post:
+      operationId: changeOwnPassword
+      tags: [Account]
+      summary: Change the own password
+      description: |
+        Replaces the password after checking the current one. Every other session of the user is revoked; the
+        session that made the request stays signed in. A wrong current password answers
+        `400 VALIDATION_FAILED` with the field code `INCORRECT` on `current_password`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordChangeRequest"
+      responses:
+        "204":
+          description: The password is changed.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/tenant:
+    get:
+      operationId: getTenantProfile
+      tags: [Tenants]
+      summary: The caller's tenant
+      description: "`ADMIN` only. Every user sees a summary of its tenant in `GET /api/v1/me`."
+      responses:
+        "200":
+          description: The tenant profile.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    patch:
+      operationId: updateTenantProfile
+      tags: [Tenants]
+      summary: Update the caller's tenant
+      description: |
+        `ADMIN` only. A JSON merge patch of the legal name and the SSCC extension digit; a new extension digit
+        opens a new SSCC serial space when the current one is exhausted. The code, tax code, and company prefix
+        identify the tenant and cannot change (`UNKNOWN_FIELD`).
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: "#/components/schemas/TenantPatch"
+            example:
+              legal_name: Saigon Fresh Foods Joint Stock Company
+      responses:
+        "200":
+          description: The updated tenant profile.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/users:
+    get:
+      operationId: listUsers
+      tags: [Users]
+      summary: List users
+      description: |
+        Newest first. `ADMIN` sees every user of the tenant. `WAREHOUSE_MANAGER` may list drivers only, with
+        `role=DRIVER`, to assign them to shipments; any other query answers 403.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: role
+          in: query
+          schema:
+            $ref: "#/components/schemas/Role"
+        - name: is_active
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: A page of users.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: createUser
+      tags: [Users]
+      summary: Create a user
+      description: |
+        `ADMIN` only. The admin sets the first password and hands it over; the user can change it with
+        `POST /api/v1/me/password`. Email addresses are unique across all tenants, ignoring case.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserCreateRequest"
+            example:
+              email: binh@sgfresh.example
+              password: initial-password-2026
+              full_name: Tran Van Binh
+              phone: "0901 234 567"
+              role: DRIVER
+      responses:
+        "201":
+          description: The user is created. `Location` points to it.
+          headers:
+            Location:
+              schema:
+                type: string
+                example: /api/v1/users/0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d91
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/users/{user_id}:
+    parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getUser
+      tags: [Users]
+      summary: Read a user
+      description: "`ADMIN` only."
+      responses:
+        "200":
+          description: The user.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    patch:
+      operationId: updateUser
+      tags: [Users]
+      summary: Update a user
+      description: |
+        `ADMIN` only. A JSON merge patch of the name, phone (`null` or an empty string clears it), role, and
+        active flag. Admins cannot change their own role or deactivate themselves (403), so every tenant keeps
+        an active admin. Deactivating a user revokes its sessions, and it is signed out at its next refresh;
+        role changes take effect at the next refresh as well.
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: "#/components/schemas/UserPatch"
+            example:
+              is_active: false
+      responses:
+        "200":
+          description: The updated user.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/locations:
+    get:
+      operationId: listLocations
+      tags: [Catalog]
+      summary: List locations
+      description: Newest first. `ADMIN` and `WAREHOUSE_MANAGER` read their own tenant's locations.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: is_active
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: A page of locations.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocationPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: createLocation
+      tags: [Catalog]
+      summary: Create a location
+      description: |
+        `ADMIN` only. The GLN must start with the tenant's company prefix; otherwise the answer is
+        `422 INVALID_GS1_IDENTIFIER` with `PREFIX_MISMATCH`. GLNs are unique across all tenants. Text fields are
+        trimmed, and coordinates are rounded to 6 decimals.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LocationCreateRequest"
+            example:
+              gln: "8930001000025"
+              name: Tan Thuan cold store
+              address: 5 Tan Thuan Export Processing Zone, District 7
+              city: Ho Chi Minh City
+              latitude: 10.762622
+              longitude: 106.742801
+              geo_fence_radius_meters: 300
+      responses:
+        "201":
+          description: The location is created. `Location` points to it.
+          headers:
+            Location:
+              schema:
+                type: string
+                example: /api/v1/locations/0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d92
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Location"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/locations/{location_id}:
+    parameters:
+      - name: location_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getLocation
+      tags: [Catalog]
+      summary: Read a location
+      description: "`ADMIN` and `WAREHOUSE_MANAGER`."
+      responses:
+        "200":
+          description: The location.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Location"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    patch:
+      operationId: updateLocation
+      tags: [Catalog]
+      summary: Update a location
+      description: |
+        `ADMIN` only. A JSON merge patch of the name, address, city, country code, coordinates, geo-fence radius,
+        and active flag. The GLN and the headquarters flag never change. Locations are deactivated, never
+        deleted: an inactive location stays on the lots and shipments that refer to it, but leaves the
+        directory.
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: "#/components/schemas/LocationPatch"
+            example:
+              geo_fence_radius_meters: 400
+      responses:
+        "200":
+          description: The updated location.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Location"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products:
+    get:
+      operationId: listProducts
+      tags: [Catalog]
+      summary: List products
+      description: Newest first. `ADMIN` and `WAREHOUSE_MANAGER` read their own tenant's products.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: q
+          in: query
+          description: Matches part of the name, ignoring case, or part of the GTIN.
+          schema:
+            type: string
+            maxLength: 100
+        - name: is_active
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: A page of products.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: createProduct
+      tags: [Catalog]
+      summary: Create a product
+      description: |
+        `ADMIN` and `WAREHOUSE_MANAGER`. The GTIN-14 must contain the tenant's company prefix right after its
+        indicator digit; otherwise the answer is `422 INVALID_GS1_IDENTIFIER` with `PREFIX_MISMATCH`. GTINs are
+        unique across all tenants. Text fields are trimmed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductCreateRequest"
+            example:
+              gtin: "08930001000018"
+              name: Fresh milk 1 L
+              description: Pasteurized whole milk
+              min_temp_celsius: 2
+              max_temp_celsius: 6
+      responses:
+        "201":
+          description: The product is created. `Location` points to it.
+          headers:
+            Location:
+              schema:
+                type: string
+                example: /api/v1/products/0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d94
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/products/{product_id}:
+    parameters:
+      - name: product_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getProduct
+      tags: [Catalog]
+      summary: Read a product
+      description: "`ADMIN` and `WAREHOUSE_MANAGER`."
+      responses:
+        "200":
+          description: The product.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    patch:
+      operationId: updateProduct
+      tags: [Catalog]
+      summary: Update a product
+      description: |
+        `ADMIN` and `WAREHOUSE_MANAGER`. A JSON merge patch of the name, description (`null` or an empty string
+        clears it), temperature bounds, and active flag. The GTIN never changes. The minimum must stay below the
+        maximum, including the stored bound that the patch leaves as it is. New bounds apply to lots
+        commissioned afterwards; existing lots and shipments keep their own. Products are deactivated, never
+        deleted, and an inactive product takes no new lots.
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: "#/components/schemas/ProductPatch"
+            example:
+              max_temp_celsius: 4
+      responses:
+        "200":
+          description: The updated product.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/lots:
+    get:
+      operationId: listLots
+      tags: [Lots]
+      summary: List lots
+      description: |
+        Newest first. `ADMIN` and `WAREHOUSE_MANAGER` see the lots their tenant owns, and the lots of other
+        tenants that it holds or held stock of.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: product_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/LotStatus"
+      responses:
+        "200":
+          description: A page of lots.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LotPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: commissionLot
+      tags: [Lots]
+      summary: Commission a lot
+      description: |
+        `ADMIN` and `WAREHOUSE_MANAGER`. Creates an `ACTIVE` lot of one of the tenant's active products, adds the
+        quantity to the balance of one of its active locations, and records a `COMMISSIONED` inventory movement.
+        A product or location that is inactive or not the tenant's answers `400` with `INVALID_VALUE` on its
+        field. The lot copies the product's GTIN, name, and temperature bounds. A product cannot have two lots
+        with the same number (`409 IDENTIFIER_ALREADY_REGISTERED` on `lot_number`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LotCommissionRequest"
+            example:
+              product_id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d94
+              lot_number: L2026-09-30A
+              production_date: "2026-09-30"
+              expiration_date: "2026-10-14"
+              quantity_commissioned: 500
+              commissioned_location_id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d92
+      responses:
+        "201":
+          description: The lot is commissioned. `Location` points to it.
+          headers:
+            Location:
+              schema:
+                type: string
+                example: /api/v1/lots/0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d95
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lot"
+              example:
+                id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d95
+                owner_tenant_id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d8e
+                product_id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d94
+                gtin: "08930001000018"
+                product_name: Fresh milk 1 L
+                min_temp_celsius: 2
+                max_temp_celsius: 6
+                lot_number: L2026-09-30A
+                production_date: "2026-09-30"
+                expiration_date: "2026-10-14"
+                quantity_commissioned: 500
+                commissioned_location_id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d92
+                status: ACTIVE
+                recalled_at: null
+                created_at: "2026-09-30T09:00:00.123456Z"
+                updated_at: "2026-09-30T09:00:00.123456Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/lots/{lot_id}:
+    parameters:
+      - name: lot_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getLot
+      tags: [Lots]
+      summary: Read a lot
+      description: |
+        `ADMIN` and `WAREHOUSE_MANAGER` of the owner, or of a tenant that holds or held stock of the lot. Any other
+        tenant gets 404.
+      responses:
+        "200":
+          description: The lot.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lot"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/lots/{lot_id}/recall:
+    parameters:
+      - name: lot_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: recallLot
+      tags: [Lots]
+      summary: Recall a lot
+      description: |
+        `ADMIN` of the tenant that owns the lot, while the lot is `ACTIVE`; a recalled lot answers
+        `409 INVALID_STATE_TRANSITION`. In one transaction the lot becomes `RECALLED`, and every shipment of it in
+        `CREATED`, `IN_TRANSIT`, or `DELIVERED`, of any tenant and hop, becomes `RECALLED` with a `shipment.recalled`
+        event that records the reason and the previous status. From then on the lot takes no new shipments
+        (`409 LOT_RECALLED`), and its shipments refuse every command (`409 SHIPMENT_RECALLED_LOCKED`). Stock stays
+        where it is.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecallRequest"
+            example:
+              reason: Supplier reported contamination
+      responses:
+        "201":
+          description: The lot is recalled.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Recall"
+              example:
+                id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7dc1
+                lot_id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d95
+                reason: Supplier reported contamination
+                affected_shipment_count: 4
+                initiated_by: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d90
+                created_at: "2026-10-02T09:00:00.000001Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/inventory:
+    get:
+      operationId: listInventory
+      tags: [Inventory]
+      summary: List stock balances
+      description: |
+        `ADMIN` and `WAREHOUSE_MANAGER`. The balances above zero at the tenant's locations, including stock of
+        lots owned by other tenants, ordered by location and then lot, newest first.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: location_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: lot_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: A page of balances.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BalancePage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/shipments:
+    get:
+      operationId: listShipments
+      tags: [Shipments]
+      summary: List shipments
+      description: |
+        Newest first: the shipments in which the caller's tenant takes part. A `DRIVER` sees only the shipments assigned
+        to it, whatever the filters say.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/ShipmentStatus"
+        - name: party
+          in: query
+          description: Keeps the shipments in which the caller's tenant has this role.
+          schema:
+            $ref: "#/components/schemas/ParticipantRole"
+        - name: sscc
+          in: query
+          description: A scanned SSCC; a malformed one answers `422 INVALID_GS1_IDENTIFIER`.
+          schema:
+            type: string
+            pattern: "^[0-9]{18}$"
+        - name: lot_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: assigned_to_me
+          in: query
+          description: Keeps the shipments assigned to the caller as driver.
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: A page of shipments.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShipmentPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: createShipment
+      tags: [Shipments]
+      summary: Create a shipment
+      description: |
+        `ADMIN` and `WAREHOUSE_MANAGER` of a tenant that holds the lot. In one transaction the service issues the
+        SSCC, copies the product, lot, origin, and destination fields onto the shipment, records the participants
+        (`OWNER` the caller's tenant, `CARRIER` the carrier or the owner itself, `CONSIGNEE` the tenant of the
+        destination GLN), takes the quantity from the origin balance, and appends `shipment.created`.
+
+        The lot, origin, destination, carrier, and driver must be usable: a lot the tenant does not hold, an origin
+        that is not one of its active locations, a destination GLN that the directory does not list or that equals
+        the origin, an unknown carrier code, or a driver who is not an active driver of the tenant answers `400`
+        with `INVALID_VALUE` on that field. A driver can be set only when the owner carries the goods itself. A
+        recalled lot answers `409 LOT_RECALLED`, an origin balance below the quantity `409 INSUFFICIENT_STOCK`, and
+        an exhausted serial space `409 SSCC_SERIAL_EXHAUSTED`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShipmentCreateRequest"
+            example:
+              lot_id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d95
+              quantity: 480
+              origin_location_id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d92
+              destination_gln: "8934567000017"
+              carrier_tenant_code: MEKONG_LOGISTICS
+      responses:
+        "201":
+          description: The shipment is created. `Location` points to it.
+          headers:
+            Location:
+              schema:
+                type: string
+                example: /api/v1/shipments/0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7da0
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shipment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/shipments/summary:
+    get:
+      operationId: getShipmentSummary
+      tags: [Shipments]
+      summary: Count shipments by status
+      description: The shipments that `GET /api/v1/shipments` would list, counted by status.
+      responses:
+        "200":
+          description: The counts.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShipmentSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/shipments/{shipment_id}:
+    parameters:
+      - $ref: "#/components/parameters/ShipmentID"
+    get:
+      operationId: getShipment
+      tags: [Shipments]
+      summary: Read a shipment
+      description: |
+        Any participant. A `DRIVER` of the carrier reads only the shipments assigned to it (403 otherwise); other
+        tenants get 404.
+      responses:
+        "200":
+          description: The shipment.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shipment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/shipments/{shipment_id}/carrier:
+    parameters:
+      - $ref: "#/components/parameters/ShipmentID"
+    post:
+      operationId: assignCarrier
+      tags: [Shipments]
+      summary: Assign a carrier
+      description: |
+        `ADMIN` and `WAREHOUSE_MANAGER` of the owner, while the shipment is `CREATED` and the owner still carries it
+        itself; otherwise `409 INVALID_STATE_TRANSITION`. The carrier replaces the owner as `CARRIER`, the owner's
+        driver is released, and `shipment.participant_added` is appended.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CarrierAssignment"
+      responses:
+        "200":
+          $ref: "#/components/responses/UpdatedShipment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/shipments/{shipment_id}/driver:
+    parameters:
+      - $ref: "#/components/parameters/ShipmentID"
+    post:
+      operationId: assignDriver
+      tags: [Shipments]
+      summary: Assign or replace the driver
+      description: |
+        `ADMIN` and `WAREHOUSE_MANAGER` of the carrier, while the shipment is `CREATED`. The driver must be an active
+        `DRIVER` of the carrier. Appends `shipment.driver_assigned`; assigning the driver already assigned changes
+        nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DriverAssignment"
+      responses:
+        "200":
+          $ref: "#/components/responses/UpdatedShipment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/shipments/{shipment_id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/ShipmentID"
+    post:
+      operationId: cancelShipment
+      tags: [Shipments]
+      summary: Cancel a shipment
+      description: |
+        `ADMIN` and `WAREHOUSE_MANAGER` of the owner, while the shipment is `CREATED`. The quantity returns to the
+        origin balance, the SSCC is never reused, and `shipment.cancelled` records the reason.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Cancellation"
+            example:
+              reason: Customer order withdrawn
+      responses:
+        "200":
+          $ref: "#/components/responses/UpdatedShipment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/shipments/{shipment_id}/pickup-code:
+    parameters:
+      - $ref: "#/components/parameters/ShipmentID"
+    post:
+      operationId: issuePickupCode
+      tags: [Shipments]
+      summary: Issue a pickup code
+      description: |
+        `ADMIN` and `WAREHOUSE_MANAGER` of the owner, while the shipment is `CREATED` and has a driver; otherwise
+        `409 INVALID_STATE_TRANSITION`. The 6-digit code is valid for 15 minutes and 5 attempts and replaces any code
+        issued before. It is returned only here and stored only as an HMAC: hand it to the driver at the dock.
+        Assigning another driver or carrier, or cancelling, ends it.
+      responses:
+        "201":
+          description: The code. The response must not be cached.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PickupCode"
+              example:
+                code: "042917"
+                expires_at: "2026-10-02T08:15:00.123456Z"
+                attempts_allowed: 5
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/shipments/{shipment_id}/pickup:
+    parameters:
+      - $ref: "#/components/parameters/ShipmentID"
+    post:
+      operationId: confirmPickup
+      tags: [Shipments]
+      summary: Confirm pickup
+      description: |
+        The assigned `DRIVER` takes custody at the origin. The checks run in this order: the shipment is not
+        recalled (`409 SHIPMENT_RECALLED_LOCKED`) and is `CREATED` (`409 INVALID_STATE_TRANSITION`); the caller is
+        its assigned driver (403); the scanned SSCC is the shipment's (`422 SSCC_MISMATCH`); a code is active
+        (`422 PICKUP_CODE_EXPIRED`) and has attempts left (`423 PICKUP_CODE_LOCKED`); the code is right
+        (`422 PICKUP_CODE_INVALID` with `remaining_attempts`, and the attempt is spent); the position is inside the
+        origin geo-fence (`422 OUTSIDE_GEOFENCE` with `distance_meters` and `allowed_meters`). On success the code
+        is consumed, the shipment is `IN_TRANSIT`, and `shipment.pickup_confirmed` records the position.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PickupConfirmation"
+            example:
+              sscc: "089300010000000018"
+              code: "042917"
+              position:
+                latitude: 10.762701
+                longitude: 106.742912
+                accuracy_meters: 12
+      responses:
+        "200":
+          $ref: "#/components/responses/UpdatedShipment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "423":
+          $ref: "#/components/responses/Locked"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/shipments/{shipment_id}/checkpoints:
+    parameters:
+      - $ref: "#/components/parameters/ShipmentID"
+    post:
+      operationId: recordCheckpoint
+      tags: [Shipments]
+      summary: Record a checkpoint
+      description: |
+        The assigned `DRIVER`, while the shipment is `IN_TRANSIT`, at an intermediate facility named by its GLN: an
+        active location of any tenant, or `400` with `INVALID_VALUE` on `gln`. The scanned SSCC must be the
+        shipment's (`422 SSCC_MISMATCH`) and the position inside the facility's geo-fence
+        (`422 OUTSIDE_GEOFENCE`). The status stays `IN_TRANSIT`; `shipment.checkpoint_recorded` records the facility
+        and the position.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CheckpointRecord"
+      responses:
+        "200":
+          $ref: "#/components/responses/UpdatedShipment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/shipments/{shipment_id}/delivery:
+    parameters:
+      - $ref: "#/components/parameters/ShipmentID"
+    post:
+      operationId: confirmDelivery
+      tags: [Shipments]
+      summary: Confirm delivery
+      description: |
+        `ADMIN` and `WAREHOUSE_MANAGER` of the consignee, while the shipment is `IN_TRANSIT`. The scanned SSCC must
+        be the shipment's (`422 SSCC_MISMATCH`) and the position inside the destination geo-fence
+        (`422 OUTSIDE_GEOFENCE`). The shipment is `DELIVERED`, the quantity lands on the consignee's balance at the
+        destination, which makes the consignee a holder of the lot, and `shipment.delivery_confirmed` records the
+        position.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliveryConfirmation"
+      responses:
+        "200":
+          $ref: "#/components/responses/UpdatedShipment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/shipments/{shipment_id}/events:
+    parameters:
+      - $ref: "#/components/parameters/ShipmentID"
+    get:
+      operationId: listShipmentEvents
+      tags: [Shipments]
+      summary: Read the event log
+      description: |
+        Oldest first, with the hashes that chain the events (ADR-0006). Each item carries every member that its hash
+        covers, so a client can recompute the chain itself (see `docs/contracts/messaging.md` §2.1).
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: A page of events.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShipmentEventPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/shipments/{shipment_id}/integrity:
+    parameters:
+      - $ref: "#/components/parameters/ShipmentID"
+    get:
+      operationId: verifyShipmentIntegrity
+      tags: [Shipments]
+      summary: Verify the event log
+      description: |
+        Recomputes the hash chain: every event must have the next sequence number, link to the hash of the event
+        before it, and hash to its stored hash. A rewritten, removed, or reordered event breaks the chain at
+        `first_invalid_sequence`.
+      responses:
+        "200":
+          description: The result.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Integrity"
+              example:
+                valid: true
+                event_count: 3
+                head_hash: b950012d685ecf3e7f7ccf416581645cd8a0e61070e08d7c11fc1448d9212435
+                first_invalid_sequence: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/directory/locations/{gln}:
+    parameters:
+      - name: gln
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: "^[0-9]{13}$"
+    get:
+      operationId: lookUpLocation
+      tags: [Directory]
+      summary: Look up a GLN
+      description: |
+        Any signed-in user. Resolves the GLN of an active location of an active tenant, own or other, to its
+        public fields and its tenant. A GLN with a wrong length, a non-digit, or a wrong check digit answers
+        `422 INVALID_GS1_IDENTIFIER`; a valid GLN without an active location answers 404.
+      responses:
+        "200":
+          description: The location's directory entry.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DirectoryLocation"
+              example:
+                gln: "8930001000025"
+                name: Tan Thuan cold store
+                address: 5 Tan Thuan Export Processing Zone, District 7
+                city: Ho Chi Minh City
+                country_code: VN
+                latitude: 10.762622
+                longitude: 106.742801
+                geo_fence_radius_meters: 300
+                tenant:
+                  id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d8e
+                  code: SGFRESH
+                  legal_name: Saigon Fresh Foods Joint Stock Company
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableContent"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/directory/tenants/{code}:
+    parameters:
+      - name: code
+        in: path
+        required: true
+        description: Tenant code; matched ignoring case.
+        schema:
+          type: string
+    get:
+      operationId: lookUpTenant
+      tags: [Directory]
+      summary: Look up a tenant code
+      description: Any signed-in user. Resolves the code of an active tenant, for example to pick a carrier.
+      responses:
+        "200":
+          description: The tenant's directory entry.
+          headers:
+            X-Trace-Id:
+              $ref: "#/components/headers/TraceId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DirectoryTenant"
+              example:
+                id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d93
+                code: MEKONG_LOGISTICS
+                legal_name: Mekong Logistics Company Limited
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   securitySchemes:
     bearerAuth:
@@ -40,6 +1707,13 @@ components:
       description: Opaque cursor from a previous page's `next_cursor`.
       schema:
         type: string
+    ShipmentID:
+      name: shipment_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
   headers:
     TraceId:
       description: Trace ID of the request, for support and log correlation.
@@ -78,6 +1752,15 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/FieldError"
+        remaining_attempts:
+          type: integer
+          description: "`PICKUP_CODE_INVALID`: attempts left on the code."
+        distance_meters:
+          type: number
+          description: "`OUTSIDE_GEOFENCE`: distance between the reported position and the facility."
+        allowed_meters:
+          type: number
+          description: "`OUTSIDE_GEOFENCE`: the geo-fence radius plus the accuracy allowance (at most 50 m)."
     FieldError:
       type: object
       required: [field, code, message]
@@ -90,9 +1773,1104 @@ components:
           example: CHECK_DIGIT
         message:
           type: string
+    Tenant:
+      type: object
+      description: A company registered on VeriTrace.
+      required: [id, code, legal_name, tax_code, gs1_company_prefix, sscc_extension_digit, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          description: Short unique code, used by other tenants to select a carrier or inspector.
+          pattern: "^[A-Z0-9_]{3,32}$"
+        legal_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        tax_code:
+          type: string
+          pattern: "^[0-9]{10}(-[0-9]{3})?$"
+        gs1_company_prefix:
+          type: string
+          description: GS1 company prefix (GCP). Every GLN and GTIN of the tenant starts with it.
+          pattern: "^[0-9]{6,10}$"
+        sscc_extension_digit:
+          type: integer
+          description: First digit of the SSCCs the tenant issues.
+          minimum: 0
+          maximum: 9
+        status:
+          type: string
+          description: Users of a `SUSPENDED` tenant cannot sign in.
+          enum: [ACTIVE, SUSPENDED]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Location:
+      type: object
+      description: A warehouse, hub, or headquarters of the caller's tenant, identified by its GLN.
+      required: [id, gln, name, address, city, country_code, latitude, longitude, geo_fence_radius_meters, is_headquarters, is_active, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        gln:
+          type: string
+          pattern: "^[0-9]{13}$"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        address:
+          type: string
+          minLength: 1
+          maxLength: 500
+        city:
+          type: string
+          minLength: 1
+          maxLength: 100
+        country_code:
+          type: string
+          description: ISO 3166-1 alpha-2 code.
+          pattern: "^[A-Z]{2}$"
+        latitude:
+          type: number
+          description: WGS-84 degrees, 6 decimals.
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          description: WGS-84 degrees, 6 decimals.
+          minimum: -180
+          maximum: 180
+        geo_fence_radius_meters:
+          type: integer
+          minimum: 50
+          maximum: 5000
+        is_headquarters:
+          type: boolean
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    LocationCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [gln, name, address, city, latitude, longitude]
+      properties:
+        gln:
+          type: string
+          description: Must start with the tenant's GS1 company prefix and end with a valid check digit.
+          pattern: "^[0-9]{13}$"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        address:
+          type: string
+          minLength: 1
+          maxLength: 500
+        city:
+          type: string
+          minLength: 1
+          maxLength: 100
+        country_code:
+          type: string
+          pattern: "^[A-Z]{2}$"
+          default: VN
+        latitude:
+          type: number
+          description: Rounded to 6 decimals.
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          description: Rounded to 6 decimals.
+          minimum: -180
+          maximum: 180
+        geo_fence_radius_meters:
+          type: integer
+          minimum: 50
+          maximum: 5000
+          default: 200
+    LocationPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        address:
+          type: string
+          minLength: 1
+          maxLength: 500
+        city:
+          type: string
+          minLength: 1
+          maxLength: 100
+        country_code:
+          type: string
+          pattern: "^[A-Z]{2}$"
+        latitude:
+          type: number
+          description: Rounded to 6 decimals.
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          description: Rounded to 6 decimals.
+          minimum: -180
+          maximum: 180
+        geo_fence_radius_meters:
+          type: integer
+          minimum: 50
+          maximum: 5000
+        is_active:
+          type: boolean
+          description: Inactive locations cannot receive new lots or shipments and are not in the directory.
+    LocationPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Location"
+        next_cursor:
+          type: [string, "null"]
+          description: Pass as `cursor` to read the next page; `null` on the last page.
+    Temperature:
+      type: number
+      description: Degrees Celsius, at most 2 decimals.
+      minimum: -50
+      maximum: 80
+    Product:
+      type: object
+      description: A trade item of the caller's tenant, identified by its GTIN-14.
+      required: [id, gtin, name, description, min_temp_celsius, max_temp_celsius, is_active, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        gtin:
+          type: string
+          description: GTIN-14. GTIN-8, -12, and -13 are left-padded with zeros.
+          pattern: "^[0-9]{14}$"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 1000
+        min_temp_celsius:
+          $ref: "#/components/schemas/Temperature"
+        max_temp_celsius:
+          $ref: "#/components/schemas/Temperature"
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ProductCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [gtin, name, min_temp_celsius, max_temp_celsius]
+      properties:
+        gtin:
+          type: string
+          description: |
+            GTIN-14 with the tenant's company prefix after the indicator digit and a valid check digit. Clients
+            left-pad GTIN-8, -12, and -13 with zeros.
+          pattern: "^[0-9]{14}$"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: [string, "null"]
+          description: "`null` or an empty string means no description."
+          maxLength: 1000
+        min_temp_celsius:
+          $ref: "#/components/schemas/Temperature"
+        max_temp_celsius:
+          description: Must be higher than `min_temp_celsius`.
+          allOf:
+            - $ref: "#/components/schemas/Temperature"
+    ProductPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: [string, "null"]
+          description: "`null` or an empty string clears it."
+          maxLength: 1000
+        min_temp_celsius:
+          $ref: "#/components/schemas/Temperature"
+        max_temp_celsius:
+          $ref: "#/components/schemas/Temperature"
+        is_active:
+          type: boolean
+    ProductPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Product"
+        next_cursor:
+          type: [string, "null"]
+          description: Pass as `cursor` to read the next page; `null` on the last page.
+    LotStatus:
+      type: string
+      description: A `RECALLED` lot takes no new shipments, and its shipments accept no further commands.
+      enum: [ACTIVE, RECALLED]
+    LotNumber:
+      type: string
+      description: GS1 AI 10, restricted to characters that need no escaping in URLs.
+      pattern: "^[0-9A-Za-z._-]{1,20}$"
+    Lot:
+      type: object
+      description: |
+        A production batch of one product. The GTIN, product name, and temperature bounds are copied from the
+        product at commissioning, so tenants that hold the lot read them without the owner's catalog.
+      required:
+        - id
+        - owner_tenant_id
+        - product_id
+        - gtin
+        - product_name
+        - min_temp_celsius
+        - max_temp_celsius
+        - lot_number
+        - production_date
+        - expiration_date
+        - quantity_commissioned
+        - commissioned_location_id
+        - status
+        - recalled_at
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        owner_tenant_id:
+          type: string
+          format: uuid
+          description: The tenant that commissioned the lot. Compare with the caller's tenant to tell owned lots from held ones.
+        product_id:
+          type: string
+          format: uuid
+          description: A product of the owner.
+        gtin:
+          type: string
+          pattern: "^[0-9]{14}$"
+        product_name:
+          type: string
+        min_temp_celsius:
+          $ref: "#/components/schemas/Temperature"
+        max_temp_celsius:
+          $ref: "#/components/schemas/Temperature"
+        lot_number:
+          $ref: "#/components/schemas/LotNumber"
+        production_date:
+          type: string
+          format: date
+        expiration_date:
+          type: string
+          format: date
+        quantity_commissioned:
+          type: integer
+          minimum: 1
+        commissioned_location_id:
+          type: string
+          format: uuid
+          description: A location of the owner.
+        status:
+          $ref: "#/components/schemas/LotStatus"
+        recalled_at:
+          type: [string, "null"]
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    LotCommissionRequest:
+      type: object
+      additionalProperties: false
+      required: [product_id, lot_number, production_date, expiration_date, quantity_commissioned, commissioned_location_id]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+          description: An active product of the caller's tenant.
+        lot_number:
+          $ref: "#/components/schemas/LotNumber"
+        production_date:
+          type: string
+          format: date
+        expiration_date:
+          type: string
+          format: date
+          description: Not earlier than `production_date`.
+        quantity_commissioned:
+          type: integer
+          minimum: 1
+          maximum: 2147483647
+        commissioned_location_id:
+          type: string
+          format: uuid
+          description: An active location of the caller's tenant, where the goods were produced or stored.
+    RecallRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 1000
+    Recall:
+      type: object
+      required: [id, lot_id, reason, affected_shipment_count, initiated_by, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        lot_id:
+          type: string
+          format: uuid
+        reason:
+          type: string
+        affected_shipment_count:
+          type: integer
+          description: Shipments of the lot, across all tenants, that became `RECALLED`.
+        initiated_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+    LotPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Lot"
+        next_cursor:
+          type: [string, "null"]
+          description: Pass as `cursor` to read the next page; `null` on the last page.
+    Balance:
+      type: object
+      description: The stock of one lot at one location of the caller's tenant.
+      required: [location, lot, quantity_on_hand, updated_at]
+      properties:
+        location:
+          type: object
+          required: [id, gln, name]
+          properties:
+            id:
+              type: string
+              format: uuid
+            gln:
+              type: string
+              pattern: "^[0-9]{13}$"
+            name:
+              type: string
+        lot:
+          type: object
+          required: [id, lot_number, gtin, product_name, expiration_date, status]
+          properties:
+            id:
+              type: string
+              format: uuid
+            lot_number:
+              $ref: "#/components/schemas/LotNumber"
+            gtin:
+              type: string
+              pattern: "^[0-9]{14}$"
+            product_name:
+              type: string
+            expiration_date:
+              type: string
+              format: date
+            status:
+              $ref: "#/components/schemas/LotStatus"
+        quantity_on_hand:
+          type: integer
+          minimum: 1
+        updated_at:
+          type: string
+          format: date-time
+    BalancePage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Balance"
+        next_cursor:
+          type: [string, "null"]
+          description: Pass as `cursor` to read the next page; `null` on the last page.
+    CheckpointRecord:
+      type: object
+      additionalProperties: false
+      required: [sscc, gln, position]
+      properties:
+        sscc:
+          type: string
+          description: The SSCC scanned from the pallet label.
+          pattern: "^[0-9]{18}$"
+        gln:
+          type: string
+          description: The facility, scanned or typed; the directory resolves it.
+          pattern: "^[0-9]{13}$"
+        position:
+          $ref: "#/components/schemas/Position"
+    DeliveryConfirmation:
+      type: object
+      additionalProperties: false
+      required: [sscc, position]
+      properties:
+        sscc:
+          type: string
+          description: The SSCC scanned from the pallet label.
+          pattern: "^[0-9]{18}$"
+        position:
+          $ref: "#/components/schemas/Position"
+    ShipmentStatus:
+      type: string
+      description: See docs/domain/shipment-lifecycle.md §3.
+      enum: [CREATED, IN_TRANSIT, DELIVERED, CANCELLED, RECALLED]
+    ParticipantRole:
+      type: string
+      description: A tenant's part in a shipment. `INSPECTOR` arrives in M2.
+      enum: [OWNER, CARRIER, CONSIGNEE, INSPECTOR]
+    Participant:
+      type: object
+      description: A tenant involved in the shipment, with its directory fields as they were when it joined.
+      required: [tenant_id, role, tenant_code, legal_name]
+      properties:
+        tenant_id:
+          type: string
+          format: uuid
+        role:
+          $ref: "#/components/schemas/ParticipantRole"
+        tenant_code:
+          type: string
+        legal_name:
+          type: string
+    Facility:
+      type: object
+      description: The origin or destination as it was when the shipment was created.
+      required: [location_id, gln, name, latitude, longitude, geo_fence_radius_meters]
+      properties:
+        location_id:
+          type: string
+          format: uuid
+        gln:
+          type: string
+          pattern: "^[0-9]{13}$"
+        name:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+        geo_fence_radius_meters:
+          type: integer
+    Shipment:
+      type: object
+      description: |
+        A quantity of one lot moving as one logistic unit, identified by its SSCC. The product, lot, origin, and
+        destination fields are snapshots taken when the shipment was created.
+      required:
+        - id
+        - sscc
+        - status
+        - quantity
+        - lot
+        - product
+        - origin
+        - destination
+        - owner_tenant_id
+        - carrier_tenant_id
+        - consignee_tenant_id
+        - assigned_driver_id
+        - participants
+        - picked_up_at
+        - delivered_at
+        - cancelled_at
+        - recalled_at
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        sscc:
+          type: string
+          pattern: "^[0-9]{18}$"
+        status:
+          $ref: "#/components/schemas/ShipmentStatus"
+        quantity:
+          type: integer
+          minimum: 1
+        lot:
+          type: object
+          required: [id, lot_number, expiration_date]
+          properties:
+            id:
+              type: string
+              format: uuid
+            lot_number:
+              $ref: "#/components/schemas/LotNumber"
+            expiration_date:
+              type: string
+              format: date
+        product:
+          type: object
+          required: [gtin, name, min_temp_celsius, max_temp_celsius]
+          properties:
+            gtin:
+              type: string
+              pattern: "^[0-9]{14}$"
+            name:
+              type: string
+            min_temp_celsius:
+              $ref: "#/components/schemas/Temperature"
+            max_temp_celsius:
+              $ref: "#/components/schemas/Temperature"
+        origin:
+          $ref: "#/components/schemas/Facility"
+        destination:
+          $ref: "#/components/schemas/Facility"
+        owner_tenant_id:
+          type: string
+          format: uuid
+        carrier_tenant_id:
+          type: string
+          format: uuid
+        consignee_tenant_id:
+          type: string
+          format: uuid
+        assigned_driver_id:
+          type: [string, "null"]
+          format: uuid
+          description: A user of the carrier.
+        participants:
+          type: array
+          items:
+            $ref: "#/components/schemas/Participant"
+        picked_up_at:
+          type: [string, "null"]
+          format: date-time
+        delivered_at:
+          type: [string, "null"]
+          format: date-time
+        cancelled_at:
+          type: [string, "null"]
+          format: date-time
+        recalled_at:
+          type: [string, "null"]
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ShipmentPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Shipment"
+        next_cursor:
+          type: [string, "null"]
+          description: Pass as `cursor` to read the next page; `null` on the last page.
+    ShipmentCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [lot_id, quantity, origin_location_id, destination_gln]
+      properties:
+        lot_id:
+          type: string
+          format: uuid
+          description: A lot that the caller's tenant owns or holds.
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 2147483647
+        origin_location_id:
+          type: string
+          format: uuid
+          description: An active location of the caller's tenant that holds at least the quantity of the lot.
+        destination_gln:
+          type: string
+          pattern: "^[0-9]{13}$"
+          description: An active location of any tenant, as the directory lists it; not the origin.
+        carrier_tenant_code:
+          type: [string, "null"]
+          description: The carrier's tenant code, matched ignoring case. Omitted, the owner carries the goods itself.
+        driver_user_id:
+          type: [string, "null"]
+          format: uuid
+          description: One of the owner's active drivers, when the owner carries the goods itself.
+    CarrierAssignment:
+      type: object
+      additionalProperties: false
+      required: [carrier_tenant_code]
+      properties:
+        carrier_tenant_code:
+          type: string
+          description: Another tenant's code, matched ignoring case.
+    DriverAssignment:
+      type: object
+      additionalProperties: false
+      required: [driver_user_id]
+      properties:
+        driver_user_id:
+          type: string
+          format: uuid
+    Cancellation:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 1000
+    ShipmentSummary:
+      type: object
+      required: [created, in_transit, delivered, cancelled, recalled]
+      properties:
+        created:
+          type: integer
+        in_transit:
+          type: integer
+        delivered:
+          type: integer
+        cancelled:
+          type: integer
+        recalled:
+          type: integer
+    ShipmentEvent:
+      type: object
+      description: |
+        One entry of a shipment's log. `event_hash` is the SHA-256, in lowercase hex, of the RFC 8785 canonical
+        JSON of every other member; `prev_event_hash` is the hash of the event before, or 64 zeros.
+      required: [event_id, event_type, event_version, occurred_at, subject, actor, sequence, prev_event_hash, event_hash, data]
+      properties:
+        event_id:
+          type: string
+          format: uuid
+        event_type:
+          type: string
+          example: shipment.driver_assigned
+        event_version:
+          type: integer
+        occurred_at:
+          type: string
+          format: date-time
+          description: UTC with exactly six fractional digits, as hashed.
+          example: "2026-10-02T08:05:30.250000Z"
+        subject:
+          type: object
+          required: [shipment_id, sscc, status]
+          properties:
+            shipment_id:
+              type: string
+              format: uuid
+            sscc:
+              type: string
+            status:
+              $ref: "#/components/schemas/ShipmentStatus"
+        actor:
+          type: [object, "null"]
+          required: [tenant_id, user_id]
+          properties:
+            tenant_id:
+              type: string
+              format: uuid
+            user_id:
+              type: string
+              format: uuid
+        sequence:
+          type: integer
+          minimum: 1
+        prev_event_hash:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        event_hash:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        data:
+          type: object
+          description: The payload of the event type (docs/contracts/messaging.md §3).
+    ShipmentEventPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ShipmentEvent"
+        next_cursor:
+          type: [string, "null"]
+          description: Pass as `cursor` to read the next page; `null` on the last page.
+    Integrity:
+      type: object
+      required: [valid, event_count, head_hash, first_invalid_sequence]
+      properties:
+        valid:
+          type: boolean
+        event_count:
+          type: integer
+        head_hash:
+          type: [string, "null"]
+          description: The stored hash of the last event.
+        first_invalid_sequence:
+          type: [integer, "null"]
+          description: The first position where the chain breaks; `null` when it is valid.
+    DirectoryTenant:
+      type: object
+      description: The public entry of an active tenant.
+      required: [id, code, legal_name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          pattern: "^[A-Z0-9_]{3,32}$"
+        legal_name:
+          type: string
+    DirectoryLocation:
+      type: object
+      description: The public entry of an active location of an active tenant.
+      required: [gln, name, address, city, country_code, latitude, longitude, geo_fence_radius_meters, tenant]
+      properties:
+        gln:
+          type: string
+          pattern: "^[0-9]{13}$"
+        name:
+          type: string
+        address:
+          type: string
+        city:
+          type: string
+        country_code:
+          type: string
+          pattern: "^[A-Z]{2}$"
+        latitude:
+          type: number
+          description: WGS-84 degrees, 6 decimals.
+        longitude:
+          type: number
+          description: WGS-84 degrees, 6 decimals.
+        geo_fence_radius_meters:
+          type: integer
+          description: Positions within this distance of the coordinates count as at the location.
+        tenant:
+          $ref: "#/components/schemas/DirectoryTenant"
+    Role:
+      type: string
+      description: The user's role within its tenant. `INSPECTOR` gains permissions in M2.
+      enum: [ADMIN, WAREHOUSE_MANAGER, DRIVER, INSPECTOR]
+    User:
+      type: object
+      description: A user of the caller's tenant.
+      required: [id, email, full_name, phone, role, is_active, last_login_at, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        full_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        phone:
+          type: [string, "null"]
+          minLength: 6
+          maxLength: 32
+        role:
+          $ref: "#/components/schemas/Role"
+        is_active:
+          type: boolean
+          description: Inactive users cannot sign in or refresh their session.
+        last_login_at:
+          type: [string, "null"]
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Password:
+      type: string
+      description: 12 to 128 characters; any characters are allowed and nothing is trimmed.
+      format: password
+      minLength: 12
+      maxLength: 128
+    Phone:
+      type: [string, "null"]
+      description: Digits, spaces, and `+ ( ) . -`, 6 to 32 characters. `null` or an empty string clears it.
+      pattern: "^\\+?[0-9(][0-9 ().-]*[0-9]$"
+      minLength: 6
+      maxLength: 32
+    TenantSummary:
+      type: object
+      description: The tenant of the signed-in user.
+      required: [id, code, legal_name, gs1_company_prefix, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        legal_name:
+          type: string
+        gs1_company_prefix:
+          type: string
+          description: Every GLN and GTIN the tenant registers starts with it; forms validate against it.
+        status:
+          type: string
+          enum: [ACTIVE, SUSPENDED]
+    Me:
+      description: The signed-in user and its tenant.
+      allOf:
+        - $ref: "#/components/schemas/User"
+        - type: object
+          required: [tenant]
+          properties:
+            tenant:
+              $ref: "#/components/schemas/TenantSummary"
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          maxLength: 254
+        password:
+          type: string
+          format: password
+    RefreshTokenRequest:
+      type: object
+      additionalProperties: false
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+    PasswordChangeRequest:
+      type: object
+      additionalProperties: false
+      required: [current_password, new_password]
+      properties:
+        current_password:
+          type: string
+          format: password
+        new_password:
+          $ref: "#/components/schemas/Password"
+    Session:
+      type: object
+      description: A new access token, the refresh token that replaces the presented one, and the user.
+      required: [access_token, token_type, expires_in, refresh_token, refresh_token_expires_in, user]
+      properties:
+        access_token:
+          type: string
+          description: EdDSA-signed JWT with the claims `sub`, `tid`, `role`, `iat`, `exp`, and `jti`.
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+          description: Seconds until the access token expires (900).
+        refresh_token:
+          type: string
+          description: Opaque, single-use token. Keep it out of scripts (ADR-0021).
+        refresh_token_expires_in:
+          type: integer
+          description: Seconds until the refresh token expires; each refresh starts a new period.
+        user:
+          $ref: "#/components/schemas/Me"
+    JWK:
+      type: object
+      required: [kty, crv, kid, x, alg, use]
+      properties:
+        kty:
+          type: string
+          enum: [OKP]
+        crv:
+          type: string
+          enum: [Ed25519]
+        kid:
+          type: string
+        x:
+          type: string
+          description: The public key, base64url without padding.
+        alg:
+          type: string
+          enum: [EdDSA]
+        use:
+          type: string
+          enum: [sig]
+    JWKS:
+      type: object
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          items:
+            $ref: "#/components/schemas/JWK"
+    TenantPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        legal_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        sscc_extension_digit:
+          type: integer
+          minimum: 0
+          maximum: 9
+    UserCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password, full_name, role]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          $ref: "#/components/schemas/Password"
+        full_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        phone:
+          $ref: "#/components/schemas/Phone"
+        role:
+          $ref: "#/components/schemas/Role"
+    UserPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        full_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        phone:
+          $ref: "#/components/schemas/Phone"
+        role:
+          $ref: "#/components/schemas/Role"
+        is_active:
+          type: boolean
+    UserPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+        next_cursor:
+          type: [string, "null"]
+          description: Pass as `cursor` to read the next page; `null` on the last page.
+    TenantRegistrationRequest:
+      type: object
+      additionalProperties: false
+      required: [tenant, headquarters, admin]
+      properties:
+        tenant:
+          type: object
+          additionalProperties: false
+          required: [code, legal_name, tax_code, gs1_company_prefix]
+          properties:
+            code:
+              type: string
+              pattern: "^[A-Z0-9_]{3,32}$"
+            legal_name:
+              type: string
+              minLength: 1
+              maxLength: 255
+            tax_code:
+              type: string
+              pattern: "^[0-9]{10}(-[0-9]{3})?$"
+            gs1_company_prefix:
+              type: string
+              pattern: "^[0-9]{6,10}$"
+        headquarters:
+          $ref: "#/components/schemas/LocationCreateRequest"
+        admin:
+          type: object
+          additionalProperties: false
+          required: [email, password, full_name]
+          properties:
+            email:
+              type: string
+              format: email
+              maxLength: 254
+            password:
+              $ref: "#/components/schemas/Password"
+            full_name:
+              type: string
+              minLength: 1
+              maxLength: 255
+            phone:
+              $ref: "#/components/schemas/Phone"
+    TenantRegistration:
+      type: object
+      required: [tenant, headquarters, admin]
+      properties:
+        tenant:
+          $ref: "#/components/schemas/Tenant"
+        headquarters:
+          $ref: "#/components/schemas/Location"
+        admin:
+          $ref: "#/components/schemas/User"
     Position:
       type: object
-      description: Device-reported WGS-84 position.
+      description: |
+        Device-reported WGS-84 position. Coordinates are rounded to 6 decimals and the accuracy to 1. A position
+        counts as at a facility within the geo-fence radius plus the accuracy, of which at most 50 m count.
       required: [latitude, longitude, accuracy_meters]
       properties:
         latitude:
@@ -106,7 +2884,78 @@ components:
         accuracy_meters:
           type: number
           minimum: 0
+          maximum: 100000
+    PickupCode:
+      type: object
+      required: [code, expires_at, attempts_allowed]
+      properties:
+        code:
+          type: string
+          pattern: "^[0-9]{6}$"
+        expires_at:
+          type: string
+          format: date-time
+        attempts_allowed:
+          type: integer
+    PickupConfirmation:
+      type: object
+      additionalProperties: false
+      required: [sscc, code, position]
+      properties:
+        sscc:
+          type: string
+          description: The SSCC scanned from the pallet label.
+          pattern: "^[0-9]{18}$"
+        code:
+          type: string
+          pattern: "^[0-9]{6}$"
+        position:
+          $ref: "#/components/schemas/Position"
   responses:
+    UpdatedShipment:
+      description: The shipment after the command.
+      headers:
+        X-Trace-Id:
+          $ref: "#/components/headers/TraceId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Shipment"
+    Session:
+      description: Signed in. The response must not be cached.
+      headers:
+        Cache-Control:
+          schema:
+            type: string
+            example: no-store
+        X-Trace-Id:
+          $ref: "#/components/headers/TraceId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Session"
+          example:
+            access_token: eyJhbGciOiJFZERTQSIsImtpZCI6IjIwMjYtMDkiLCJ0eXAiOiJKV1QifQ.eyJ0aWQiOiIwMTkyZjdhNC03YzNlLTdkMmEtOWIxZS0zZjRhNWI2YzdkOGUiLCJyb2xlIjoiQURNSU4iLCJzdWIiOiIwMTkyZjdhNC03YzNlLTdkMmEtOWIxZS0zZjRhNWI2YzdkOTAiLCJleHAiOjE3OTEwMjM1MDAsImlhdCI6MTc5MTAyMjYwMCwianRpIjoiMDE5MmY3YTQtN2MzZS03ZDJhLTliMWUtM2Y0YTViNmM3ZDkxIn0.signature
+            token_type: Bearer
+            expires_in: 900
+            refresh_token: 3Q2y9m0bq6Yx1S8QkqUe0Z0f2nY7fQyGmW3p5d4Jt0A
+            refresh_token_expires_in: 604800
+            user:
+              id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d90
+              email: admin@sgfresh.example
+              full_name: Nguyen Van An
+              phone: "+84 28 3822 1234"
+              role: ADMIN
+              is_active: true
+              last_login_at: "2026-09-30T08:10:00.123456Z"
+              created_at: "2026-09-30T08:00:00.123456Z"
+              updated_at: "2026-09-30T08:10:00.123456Z"
+              tenant:
+                id: 0192f7a4-7c3e-7d2a-9b1e-3f4a5b6c7d8e
+                code: SGFRESH
+                legal_name: Saigon Fresh Foods Joint Stock Company
+                gs1_company_prefix: "8930001"
+                status: ACTIVE
     BadRequest:
       description: The request is malformed or fails validation.
       headers:
@@ -117,10 +2966,17 @@ components:
           schema:
             $ref: "#/components/schemas/Problem"
     Unauthorized:
-      description: Missing, invalid, or expired credentials.
+      description: |
+        Missing, invalid, or expired credentials: `UNAUTHENTICATED`, `TOKEN_EXPIRED` (refresh and retry once),
+        `INVALID_CREDENTIALS`, or `REFRESH_TOKEN_INVALID`.
       headers:
         X-Trace-Id:
           $ref: "#/components/headers/TraceId"
+        WWW-Authenticate:
+          description: Bearer challenge (RFC 6750) on requests without a valid access token.
+          schema:
+            type: string
+            example: Bearer realm="veritrace", error="invalid_token", error_description="expired"
       content:
         application/problem+json:
           schema:
@@ -154,6 +3010,33 @@ components:
             $ref: "#/components/schemas/Problem"
     UnprocessableContent:
       description: The request is well-formed but violates a domain rule.
+      headers:
+        X-Trace-Id:
+          $ref: "#/components/headers/TraceId"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Locked:
+      description: "`PICKUP_CODE_LOCKED`: the pickup code has no attempts left; the owner must issue a new one."
+      headers:
+        X-Trace-Id:
+          $ref: "#/components/headers/TraceId"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    PayloadTooLarge:
+      description: The request body exceeds 1 MiB.
+      headers:
+        X-Trace-Id:
+          $ref: "#/components/headers/TraceId"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    UnsupportedMediaType:
+      description: The request body is not `application/json`.
       headers:
         X-Trace-Id:
           $ref: "#/components/headers/TraceId"

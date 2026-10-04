@@ -1,0 +1,5 @@
+# Deliberate exceptions to the Redocly rules in redocly.yaml. See https://redocly.com/docs/cli/.
+api/openapi.yaml:
+  # The key set takes no input, so no client error can occur.
+  operation-4xx-response:
+    - '#/paths/~1.well-known~1jwks.json/get/responses'
