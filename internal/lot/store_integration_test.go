@@ -21,6 +21,9 @@ func TestCommissionWithPostgres(t *testing.T) {
 	svc := lot.NewService(lot.NewPostgresStore(db.Tenancy))
 	owner, other := db.CreateTenant(t), db.CreateTenant(t)
 	product := db.CreateProduct(t, owner)
+	if _, err := db.Owner.Exec(t.Context(), `UPDATE core.products SET shelf_life_q10 = 2.5 WHERE id = $1`, product.ID); err != nil {
+		t.Fatal(err)
+	}
 	plant := db.CreateLocation(t, owner)
 	manager := db.CreateUser(t, owner.ID, identity.RoleWarehouseManager)
 	caller := identity.Principal{UserID: manager.ID, TenantID: owner.ID, Role: identity.RoleWarehouseManager}
@@ -31,7 +34,8 @@ func TestCommissionWithPostgres(t *testing.T) {
 
 	created, err := svc.Commission(t.Context(), caller, nl)
 	if err != nil || created.OwnerTenantID != owner.ID || created.GTIN != product.GTIN || created.ProductName != "Fixture Product" ||
-		created.MinTempCelsius != 2 || created.MaxTempCelsius != 8 || created.ExpirationDate != nl.ExpirationDate ||
+		created.MinTempCelsius != 2 || created.MaxTempCelsius != 8 || created.ShelfLifeQ10 != 2.5 ||
+		created.ProductionDate != nl.ProductionDate || created.ExpirationDate != nl.ExpirationDate ||
 		created.QuantityCommissioned != 500 || created.Status != policy.LotActive || created.RecalledAt != nil {
 		t.Fatalf("Commission() = %+v, %v", created, err)
 	}
@@ -50,10 +54,12 @@ func TestCommissionWithPostgres(t *testing.T) {
 	}
 
 	// Changing the product later leaves the lot's copy as it was.
-	if _, err := db.Owner.Exec(t.Context(), `UPDATE core.products SET name = 'Renamed', max_temp_celsius = 4 WHERE id = $1`, product.ID); err != nil {
+	if _, err := db.Owner.Exec(t.Context(), `UPDATE core.products SET name = 'Renamed', max_temp_celsius = 4, shelf_life_q10 = 5
+		WHERE id = $1`, product.ID); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := svc.Get(t.Context(), caller, created.ID); err != nil || got.ProductName != "Fixture Product" || got.MaxTempCelsius != 8 {
+	if got, err := svc.Get(t.Context(), caller, created.ID); err != nil || got.ProductName != "Fixture Product" ||
+		got.MaxTempCelsius != 8 || got.ShelfLifeQ10 != 2.5 {
 		t.Errorf("Get() after a product change = %+v, %v", got, err)
 	}
 

@@ -80,7 +80,7 @@ func (r repository) CompanyPrefix(ctx context.Context, tenantID uuid.UUID) (stri
 func (r repository) Create(ctx context.Context, tenantID uuid.UUID, np NewProduct) (Product, error) {
 	row, err := r.q.CreateProduct(ctx, queries.CreateProductParams{
 		TenantID: tenantID, Gtin: np.GTIN, Name: np.Name, Description: np.Description,
-		MinTempCelsius: np.MinTempCelsius, MaxTempCelsius: np.MaxTempCelsius,
+		MinTempCelsius: np.MinTempCelsius, MaxTempCelsius: np.MaxTempCelsius, ShelfLifeQ10: np.ShelfLifeQ10,
 	})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "products_gtin_key" {
@@ -95,7 +95,8 @@ func (r repository) Create(ctx context.Context, tenantID uuid.UUID, np NewProduc
 func (r repository) Update(ctx context.Context, id uuid.UUID, p Patch) (Product, error) {
 	row, err := r.q.UpdateProduct(ctx, queries.UpdateProductParams{
 		ID: id, Name: p.Name, SetDescription: p.ClearDescription || p.Description != nil, Description: p.Description,
-		MinTempCelsius: p.MinTempCelsius, MaxTempCelsius: p.MaxTempCelsius, IsActive: p.IsActive,
+		MinTempCelsius: p.MinTempCelsius, MaxTempCelsius: p.MaxTempCelsius, ShelfLifeQ10: p.ShelfLifeQ10,
+		IsActive: p.IsActive,
 	})
 	var pgErr *pgconn.PgError
 	switch {
@@ -112,7 +113,8 @@ func (r repository) Update(ctx context.Context, id uuid.UUID, p Patch) (Product,
 func fromRow(row queries.GetProductRow) Product {
 	return Product{
 		ID: row.ID, GTIN: row.Gtin, Name: row.Name, Description: row.Description,
-		MinTempCelsius: row.MinTempCelsius, MaxTempCelsius: row.MaxTempCelsius, IsActive: row.IsActive,
+		MinTempCelsius: row.MinTempCelsius, MaxTempCelsius: row.MaxTempCelsius, ShelfLifeQ10: row.ShelfLifeQ10,
+		IsActive:  row.IsActive,
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}
 }

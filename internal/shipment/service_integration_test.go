@@ -105,12 +105,18 @@ func TestCreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
+	var produced string
+	if err := w.db.Owner.QueryRow(t.Context(), `SELECT production_date::text FROM core.lots WHERE id = $1`, w.lot.ID).
+		Scan(&produced); err != nil {
+		t.Fatal(err)
+	}
 	firstSSCC, _ := gs1.BuildSSCC(0, w.owner.GCP, 1)
 	if created.SSCC != firstSSCC || created.Status != policy.ShipmentCreated || created.Quantity != 480 ||
 		created.Product.GTIN != w.product.GTIN || created.Product.MaxTempCelsius != 8 || created.Lot.LotNumber != w.lot.LotNumber ||
 		created.Origin.GLN != w.plant.GLN || created.Destination.GLN != w.store.GLN || created.Destination.GeoFenceRadiusMeters != 200 ||
 		created.OwnerTenantID != w.owner.ID || created.CarrierTenantID != w.carrier.ID || created.ConsigneeTenantID != w.consignee.ID ||
-		created.AssignedDriverID != nil {
+		created.AssignedDriverID != nil || created.Product.ShelfLifeQ10 != 3 ||
+		created.Lot.ProductionDate.String() != produced {
 		t.Errorf("Create() = %+v", created)
 	}
 	roles := map[shipment.Role]string{}
@@ -143,12 +149,15 @@ func TestCreate(t *testing.T) {
 			Role     string
 		}
 		AssignedDriverID *uuid.UUID `json:"assigned_driver_id"`
+		ProductionDate   string     `json:"production_date"`
+		ShelfLifeQ10     float64    `json:"shelf_life_q10"`
 	}
 	if len(events) != 1 || events[0].Type != event.TypeCreated || events[0].Subject.SSCC != created.SSCC {
 		t.Fatalf("events = %+v", events)
 	}
 	if err := json.Unmarshal(events[0].Data, &data); err != nil || data.LotID != w.lot.ID || data.Quantity != 480 ||
-		data.Origin.GLN != w.plant.GLN || len(data.Participants) != 3 || data.AssignedDriverID != nil {
+		data.Origin.GLN != w.plant.GLN || len(data.Participants) != 3 || data.AssignedDriverID != nil ||
+		data.ProductionDate != created.Lot.ProductionDate.String() || data.ShelfLifeQ10 != 3 {
 		t.Errorf("created data = %s, %v", events[0].Data, err)
 	}
 

@@ -752,6 +752,7 @@ paths:
               description: Pasteurized whole milk
               min_temp_celsius: 2
               max_temp_celsius: 6
+              shelf_life_q10: 3
       responses:
         "201":
           description: The product is created. `Location` points to it.
@@ -938,6 +939,7 @@ paths:
                 product_name: Fresh milk 1 L
                 min_temp_celsius: 2
                 max_temp_celsius: 6
+                shelf_life_q10: 3
                 lot_number: L2026-09-30A
                 production_date: "2026-09-30"
                 expiration_date: "2026-10-14"
@@ -1954,10 +1956,18 @@ components:
       description: Degrees Celsius, at most 2 decimals.
       minimum: -50
       maximum: 80
+    ShelfLifeQ10:
+      type: number
+      description: |
+        How many times faster the goods age for every 10 °C above `max_temp_celsius`; two decimals. The telemetry
+        service uses it to estimate the shelf life that a shipment's thermal exposure costs (ADR-0024).
+      minimum: 1
+      maximum: 10
+      examples: [3]
     Product:
       type: object
       description: A trade item of the caller's tenant, identified by its GTIN-14.
-      required: [id, gtin, name, description, min_temp_celsius, max_temp_celsius, is_active, created_at, updated_at]
+      required: [id, gtin, name, description, min_temp_celsius, max_temp_celsius, shelf_life_q10, is_active, created_at, updated_at]
       properties:
         id:
           type: string
@@ -1978,6 +1988,8 @@ components:
           $ref: "#/components/schemas/Temperature"
         max_temp_celsius:
           $ref: "#/components/schemas/Temperature"
+        shelf_life_q10:
+          $ref: "#/components/schemas/ShelfLifeQ10"
         is_active:
           type: boolean
         created_at:
@@ -2011,6 +2023,10 @@ components:
           description: Must be higher than `min_temp_celsius`.
           allOf:
             - $ref: "#/components/schemas/Temperature"
+        shelf_life_q10:
+          description: Optional; 3 when omitted.
+          allOf:
+            - $ref: "#/components/schemas/ShelfLifeQ10"
     ProductPatch:
       type: object
       additionalProperties: false
@@ -2027,6 +2043,8 @@ components:
           $ref: "#/components/schemas/Temperature"
         max_temp_celsius:
           $ref: "#/components/schemas/Temperature"
+        shelf_life_q10:
+          $ref: "#/components/schemas/ShelfLifeQ10"
         is_active:
           type: boolean
     ProductPage:
@@ -2051,8 +2069,9 @@ components:
     Lot:
       type: object
       description: |
-        A production batch of one product. The GTIN, product name, and temperature bounds are copied from the
-        product at commissioning, so tenants that hold the lot read them without the owner's catalog.
+        A production batch of one product. The GTIN, product name, temperature bounds, and shelf-life Q10 are
+        copied from the product at commissioning, so tenants that hold the lot read them without the owner's
+        catalog.
       required:
         - id
         - owner_tenant_id
@@ -2061,6 +2080,7 @@ components:
         - product_name
         - min_temp_celsius
         - max_temp_celsius
+        - shelf_life_q10
         - lot_number
         - production_date
         - expiration_date
@@ -2091,6 +2111,8 @@ components:
           $ref: "#/components/schemas/Temperature"
         max_temp_celsius:
           $ref: "#/components/schemas/Temperature"
+        shelf_life_q10:
+          $ref: "#/components/schemas/ShelfLifeQ10"
         lot_number:
           $ref: "#/components/schemas/LotNumber"
         production_date:
@@ -2343,19 +2365,22 @@ components:
           minimum: 1
         lot:
           type: object
-          required: [id, lot_number, expiration_date]
+          required: [id, lot_number, production_date, expiration_date]
           properties:
             id:
               type: string
               format: uuid
             lot_number:
               $ref: "#/components/schemas/LotNumber"
+            production_date:
+              type: string
+              format: date
             expiration_date:
               type: string
               format: date
         product:
           type: object
-          required: [gtin, name, min_temp_celsius, max_temp_celsius]
+          required: [gtin, name, min_temp_celsius, max_temp_celsius, shelf_life_q10]
           properties:
             gtin:
               type: string
@@ -2366,6 +2391,8 @@ components:
               $ref: "#/components/schemas/Temperature"
             max_temp_celsius:
               $ref: "#/components/schemas/Temperature"
+            shelf_life_q10:
+              $ref: "#/components/schemas/ShelfLifeQ10"
         origin:
           $ref: "#/components/schemas/Facility"
         destination:

@@ -21,6 +21,7 @@ INSERT INTO core.lots (
     product_name,
     min_temp_celsius,
     max_temp_celsius,
+    shelf_life_q10,
     lot_number,
     production_date,
     expiration_date,
@@ -40,7 +41,8 @@ VALUES (
     $9,
     $10,
     $11,
-    $12
+    $12,
+    $13
 )
 RETURNING
     id,
@@ -50,6 +52,7 @@ RETURNING
     product_name,
     min_temp_celsius,
     max_temp_celsius,
+    shelf_life_q10,
     lot_number,
     production_date,
     expiration_date,
@@ -68,6 +71,7 @@ type CreateLotParams struct {
 	ProductName            string
 	MinTempCelsius         float64
 	MaxTempCelsius         float64
+	ShelfLifeQ10           float64
 	LotNumber              string
 	ProductionDate         calendar.Date
 	ExpirationDate         calendar.Date
@@ -84,6 +88,7 @@ type CreateLotRow struct {
 	ProductName            string
 	MinTempCelsius         float64
 	MaxTempCelsius         float64
+	ShelfLifeQ10           float64
 	LotNumber              string
 	ProductionDate         calendar.Date
 	ExpirationDate         calendar.Date
@@ -103,6 +108,7 @@ func (q *Queries) CreateLot(ctx context.Context, arg CreateLotParams) (CreateLot
 		arg.ProductName,
 		arg.MinTempCelsius,
 		arg.MaxTempCelsius,
+		arg.ShelfLifeQ10,
 		arg.LotNumber,
 		arg.ProductionDate,
 		arg.ExpirationDate,
@@ -119,6 +125,7 @@ func (q *Queries) CreateLot(ctx context.Context, arg CreateLotParams) (CreateLot
 		&i.ProductName,
 		&i.MinTempCelsius,
 		&i.MaxTempCelsius,
+		&i.ShelfLifeQ10,
 		&i.LotNumber,
 		&i.ProductionDate,
 		&i.ExpirationDate,
@@ -141,6 +148,7 @@ SELECT
     product_name,
     min_temp_celsius,
     max_temp_celsius,
+    shelf_life_q10,
     lot_number,
     production_date,
     expiration_date,
@@ -162,6 +170,7 @@ type GetLotRow struct {
 	ProductName            string
 	MinTempCelsius         float64
 	MaxTempCelsius         float64
+	ShelfLifeQ10           float64
 	LotNumber              string
 	ProductionDate         calendar.Date
 	ExpirationDate         calendar.Date
@@ -184,6 +193,7 @@ func (q *Queries) GetLot(ctx context.Context, id uuid.UUID) (GetLotRow, error) {
 		&i.ProductName,
 		&i.MinTempCelsius,
 		&i.MaxTempCelsius,
+		&i.ShelfLifeQ10,
 		&i.LotNumber,
 		&i.ProductionDate,
 		&i.ExpirationDate,
@@ -206,6 +216,7 @@ SELECT
     product_name,
     min_temp_celsius,
     max_temp_celsius,
+    shelf_life_q10,
     lot_number,
     production_date,
     expiration_date,
@@ -238,6 +249,7 @@ type ListLotsRow struct {
 	ProductName            string
 	MinTempCelsius         float64
 	MaxTempCelsius         float64
+	ShelfLifeQ10           float64
 	LotNumber              string
 	ProductionDate         calendar.Date
 	ExpirationDate         calendar.Date
@@ -271,6 +283,7 @@ func (q *Queries) ListLots(ctx context.Context, arg ListLotsParams) ([]ListLotsR
 			&i.ProductName,
 			&i.MinTempCelsius,
 			&i.MaxTempCelsius,
+			&i.ShelfLifeQ10,
 			&i.LotNumber,
 			&i.ProductionDate,
 			&i.ExpirationDate,
@@ -320,6 +333,7 @@ SELECT
     name,
     min_temp_celsius,
     max_temp_celsius,
+    shelf_life_q10,
     is_active
 FROM core.products
 WHERE id = $1
@@ -332,6 +346,7 @@ type LockProductRow struct {
 	Name           string
 	MinTempCelsius float64
 	MaxTempCelsius float64
+	ShelfLifeQ10   float64
 	IsActive       bool
 }
 
@@ -346,6 +361,7 @@ func (q *Queries) LockProduct(ctx context.Context, id uuid.UUID) (LockProductRow
 		&i.Name,
 		&i.MinTempCelsius,
 		&i.MaxTempCelsius,
+		&i.ShelfLifeQ10,
 		&i.IsActive,
 	)
 	return i, err

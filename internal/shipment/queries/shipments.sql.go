@@ -94,7 +94,9 @@ SELECT
     product_name,
     min_temp_celsius,
     max_temp_celsius,
+    shelf_life_q10,
     lot_number,
+    production_date,
     expiration_date,
     status
 FROM core.lots
@@ -107,7 +109,9 @@ type GetLotRow struct {
 	ProductName    string
 	MinTempCelsius float64
 	MaxTempCelsius float64
+	ShelfLifeQ10   float64
 	LotNumber      string
+	ProductionDate calendar.Date
 	ExpirationDate calendar.Date
 	Status         string
 }
@@ -121,7 +125,9 @@ func (q *Queries) GetLot(ctx context.Context, id uuid.UUID) (GetLotRow, error) {
 		&i.ProductName,
 		&i.MinTempCelsius,
 		&i.MaxTempCelsius,
+		&i.ShelfLifeQ10,
 		&i.LotNumber,
+		&i.ProductionDate,
 		&i.ExpirationDate,
 		&i.Status,
 	)
@@ -160,9 +166,11 @@ SELECT
     gtin,
     product_name,
     lot_number,
+    production_date,
     expiration_date,
     min_temp_celsius,
     max_temp_celsius,
+    shelf_life_q10,
     origin_location_id,
     origin_gln,
     origin_name,
@@ -198,9 +206,11 @@ type GetShipmentRow struct {
 	Gtin                            string
 	ProductName                     string
 	LotNumber                       string
+	ProductionDate                  calendar.Date
 	ExpirationDate                  calendar.Date
 	MinTempCelsius                  float64
 	MaxTempCelsius                  float64
+	ShelfLifeQ10                    float64
 	OriginLocationID                uuid.UUID
 	OriginGln                       string
 	OriginName                      string
@@ -237,9 +247,11 @@ func (q *Queries) GetShipment(ctx context.Context, id uuid.UUID) (GetShipmentRow
 		&i.Gtin,
 		&i.ProductName,
 		&i.LotNumber,
+		&i.ProductionDate,
 		&i.ExpirationDate,
 		&i.MinTempCelsius,
 		&i.MaxTempCelsius,
+		&i.ShelfLifeQ10,
 		&i.OriginLocationID,
 		&i.OriginGln,
 		&i.OriginName,
@@ -328,9 +340,11 @@ INSERT INTO core.shipments (
     gtin,
     product_name,
     lot_number,
+    production_date,
     expiration_date,
     min_temp_celsius,
     max_temp_celsius,
+    shelf_life_q10,
     origin_location_id,
     origin_gln,
     origin_name,
@@ -378,7 +392,9 @@ VALUES (
     $25,
     $26,
     $27,
-    $27
+    $28,
+    $29,
+    $29
 )
 RETURNING id
 `
@@ -391,9 +407,11 @@ type InsertShipmentParams struct {
 	Gtin                            string
 	ProductName                     string
 	LotNumber                       string
+	ProductionDate                  calendar.Date
 	ExpirationDate                  calendar.Date
 	MinTempCelsius                  float64
 	MaxTempCelsius                  float64
+	ShelfLifeQ10                    float64
 	OriginLocationID                uuid.UUID
 	OriginGln                       string
 	OriginName                      string
@@ -422,9 +440,11 @@ func (q *Queries) InsertShipment(ctx context.Context, arg InsertShipmentParams) 
 		arg.Gtin,
 		arg.ProductName,
 		arg.LotNumber,
+		arg.ProductionDate,
 		arg.ExpirationDate,
 		arg.MinTempCelsius,
 		arg.MaxTempCelsius,
+		arg.ShelfLifeQ10,
 		arg.OriginLocationID,
 		arg.OriginGln,
 		arg.OriginName,
@@ -504,9 +524,11 @@ SELECT
     s.gtin,
     s.product_name,
     s.lot_number,
+    s.production_date,
     s.expiration_date,
     s.min_temp_celsius,
     s.max_temp_celsius,
+    s.shelf_life_q10,
     s.origin_location_id,
     s.origin_gln,
     s.origin_name,
@@ -564,9 +586,11 @@ type ListShipmentsRow struct {
 	Gtin                            string
 	ProductName                     string
 	LotNumber                       string
+	ProductionDate                  calendar.Date
 	ExpirationDate                  calendar.Date
 	MinTempCelsius                  float64
 	MaxTempCelsius                  float64
+	ShelfLifeQ10                    float64
 	OriginLocationID                uuid.UUID
 	OriginGln                       string
 	OriginName                      string
@@ -617,9 +641,11 @@ func (q *Queries) ListShipments(ctx context.Context, arg ListShipmentsParams) ([
 			&i.Gtin,
 			&i.ProductName,
 			&i.LotNumber,
+			&i.ProductionDate,
 			&i.ExpirationDate,
 			&i.MinTempCelsius,
 			&i.MaxTempCelsius,
+			&i.ShelfLifeQ10,
 			&i.OriginLocationID,
 			&i.OriginGln,
 			&i.OriginName,
@@ -713,9 +739,11 @@ SELECT
     gtin,
     product_name,
     lot_number,
+    production_date,
     expiration_date,
     min_temp_celsius,
     max_temp_celsius,
+    shelf_life_q10,
     origin_location_id,
     origin_gln,
     origin_name,
@@ -752,9 +780,11 @@ type LockShipmentRow struct {
 	Gtin                            string
 	ProductName                     string
 	LotNumber                       string
+	ProductionDate                  calendar.Date
 	ExpirationDate                  calendar.Date
 	MinTempCelsius                  float64
 	MaxTempCelsius                  float64
+	ShelfLifeQ10                    float64
 	OriginLocationID                uuid.UUID
 	OriginGln                       string
 	OriginName                      string
@@ -791,9 +821,11 @@ func (q *Queries) LockShipment(ctx context.Context, id uuid.UUID) (LockShipmentR
 		&i.Gtin,
 		&i.ProductName,
 		&i.LotNumber,
+		&i.ProductionDate,
 		&i.ExpirationDate,
 		&i.MinTempCelsius,
 		&i.MaxTempCelsius,
+		&i.ShelfLifeQ10,
 		&i.OriginLocationID,
 		&i.OriginGln,
 		&i.OriginName,
