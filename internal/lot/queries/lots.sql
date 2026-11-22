@@ -7,6 +7,7 @@ SELECT
     product_name,
     min_temp_celsius,
     max_temp_celsius,
+    shelf_life_q10,
     lot_number,
     production_date,
     expiration_date,
@@ -32,6 +33,7 @@ SELECT
     product_name,
     min_temp_celsius,
     max_temp_celsius,
+    shelf_life_q10,
     lot_number,
     production_date,
     expiration_date,
@@ -53,6 +55,7 @@ SELECT
     name,
     min_temp_celsius,
     max_temp_celsius,
+    shelf_life_q10,
     is_active
 FROM core.products
 WHERE id = sqlc.arg(id)
@@ -75,6 +78,7 @@ INSERT INTO core.lots (
     product_name,
     min_temp_celsius,
     max_temp_celsius,
+    shelf_life_q10,
     lot_number,
     production_date,
     expiration_date,
@@ -89,6 +93,7 @@ VALUES (
     sqlc.arg(product_name),
     sqlc.arg(min_temp_celsius),
     sqlc.arg(max_temp_celsius),
+    sqlc.arg(shelf_life_q10),
     sqlc.arg(lot_number),
     sqlc.arg(production_date),
     sqlc.arg(expiration_date),
@@ -104,6 +109,7 @@ RETURNING
     product_name,
     min_temp_celsius,
     max_temp_celsius,
+    shelf_life_q10,
     lot_number,
     production_date,
     expiration_date,

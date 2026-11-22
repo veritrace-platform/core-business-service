@@ -40,6 +40,7 @@ func TestPostgresStore(t *testing.T) {
 			var err error
 			p, err = repo.Create(t.Context(), tenant.ID, product.NewProduct{
 				GTIN: gtinFor(tenant.GCP, ref), Name: name, MinTempCelsius: 2, MaxTempCelsius: 8,
+				ShelfLifeQ10: product.DefaultShelfLifeQ10,
 			})
 			return err
 		})
@@ -53,15 +54,19 @@ func TestPostgresStore(t *testing.T) {
 			var err error
 			milk, err = repo.Create(t.Context(), a.ID, product.NewProduct{
 				GTIN: gtinFor(a.GCP, 1), Name: "Chilled milk", Description: &description, MinTempCelsius: -2.5, MaxTempCelsius: 8.25,
+				ShelfLifeQ10: 3.25,
 			})
 			if err != nil || milk.GTIN != gtinFor(a.GCP, 1) || milk.MinTempCelsius != -2.5 || milk.MaxTempCelsius != 8.25 ||
+				milk.ShelfLifeQ10 != 3.25 ||
 				milk.Description == nil || *milk.Description != description || !milk.IsActive || milk.CreatedAt.IsZero() {
 				t.Errorf("Create() = %+v, %v", milk, err)
 			}
 			return err
 		})
 		err := store.WithTenantTx(t.Context(), b.ID, func(repo product.Repository) error {
-			_, err := repo.Create(t.Context(), b.ID, product.NewProduct{GTIN: milk.GTIN, Name: "Copy", MinTempCelsius: 2, MaxTempCelsius: 8})
+			_, err := repo.Create(t.Context(), b.ID, product.NewProduct{
+				GTIN: milk.GTIN, Name: "Copy", MinTempCelsius: 2, MaxTempCelsius: 8, ShelfLifeQ10: product.DefaultShelfLifeQ10,
+			})
 			return err
 		})
 		if !errors.Is(err, product.ErrGTINTaken) {
@@ -113,11 +118,13 @@ func TestPostgresStore(t *testing.T) {
 	})
 
 	t.Run("patches only the given fields and keeps the range valid", func(t *testing.T) {
-		name, minTemp, maxTemp := "Chilled milk 1 L", 4.0, 3.5
+		name, minTemp, maxTemp, q10 := "Chilled milk 1 L", 4.0, 3.5, 2.5
 		in(t, a.ID, func(repo product.Repository) error {
-			got, err := repo.Update(t.Context(), milk.ID, product.Patch{Name: &name, MinTempCelsius: &minTemp, ClearDescription: true})
+			got, err := repo.Update(t.Context(), milk.ID, product.Patch{
+				Name: &name, MinTempCelsius: &minTemp, ShelfLifeQ10: &q10, ClearDescription: true,
+			})
 			if err != nil || got.Name != name || got.MinTempCelsius != 4 || got.MaxTempCelsius != milk.MaxTempCelsius ||
-				got.Description != nil || got.GTIN != milk.GTIN {
+				got.ShelfLifeQ10 != 2.5 || got.Description != nil || got.GTIN != milk.GTIN {
 				t.Errorf("Update() = %+v, %v", got, err)
 			}
 			if _, err := repo.Update(t.Context(), uuid.New(), product.Patch{Name: &name}); !errors.Is(err, product.ErrNotFound) {

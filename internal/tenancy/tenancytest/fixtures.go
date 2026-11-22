@@ -175,10 +175,10 @@ func (d *Database) CommissionLot(t testing.TB, tenant Tenant, product Product, l
 	err := pgx.BeginFunc(t.Context(), d.Owner, func(tx pgx.Tx) error {
 		err := tx.QueryRow(t.Context(), `
 			INSERT INTO core.lots (tenant_id, product_id, gtin, product_name, min_temp_celsius, max_temp_celsius,
-			                       lot_number, production_date, expiration_date, quantity_commissioned,
+			                       shelf_life_q10, lot_number, production_date, expiration_date, quantity_commissioned,
 			                       commissioned_location_id, created_by)
 			SELECT p.tenant_id, p.id, p.gtin, p.name, p.min_temp_celsius, p.max_temp_celsius,
-			       $2, current_date, current_date + 30, $3, $4, $5
+			       p.shelf_life_q10, $2, current_date, current_date + 30, $3, $4, $5
 			FROM core.products p
 			WHERE p.id = $1
 			RETURNING id`,
@@ -242,15 +242,15 @@ func (d *Database) CreateShipment(t testing.TB, spec ShipmentSpec) Shipment {
 	err := pgx.BeginFunc(t.Context(), d.Owner, func(tx pgx.Tx) error {
 		err := tx.QueryRow(t.Context(), `
 			INSERT INTO core.shipments (
-			    owner_tenant_id, sscc, lot_id, quantity, gtin, product_name, lot_number, expiration_date,
-			    min_temp_celsius, max_temp_celsius,
+			    owner_tenant_id, sscc, lot_id, quantity, gtin, product_name, lot_number, production_date,
+			    expiration_date, min_temp_celsius, max_temp_celsius, shelf_life_q10,
 			    origin_location_id, origin_gln, origin_name, origin_latitude, origin_longitude,
 			    origin_geo_fence_radius_meters,
 			    destination_location_id, destination_gln, destination_name, destination_latitude,
 			    destination_longitude, destination_geo_fence_radius_meters,
 			    consignee_tenant_id, carrier_tenant_id, created_by)
-			SELECT $1, $2, l.id, $3, l.gtin, l.product_name, l.lot_number, l.expiration_date,
-			       l.min_temp_celsius, l.max_temp_celsius,
+			SELECT $1, $2, l.id, $3, l.gtin, l.product_name, l.lot_number, l.production_date,
+			       l.expiration_date, l.min_temp_celsius, l.max_temp_celsius, l.shelf_life_q10,
 			       o.id, o.gln, o.name, o.latitude, o.longitude, o.geo_fence_radius_meters,
 			       d.id, d.gln, d.name, d.latitude, d.longitude, d.geo_fence_radius_meters,
 			       d.tenant_id, $4, $5

@@ -27,11 +27,18 @@ type createRequest struct {
 	Description    *string  `json:"description"`
 	MinTempCelsius *float64 `json:"min_temp_celsius"`
 	MaxTempCelsius *float64 `json:"max_temp_celsius"`
+	// ShelfLifeQ10 is optional; DefaultShelfLifeQ10 applies without it.
+	ShelfLifeQ10 *float64 `json:"shelf_life_q10"`
 }
 
 // temperature checks one bound of the temperature range.
 func temperature(v *rest.Validator, field string, value *float64) bool {
 	return v.Decimal(field, value, MinTemperatureCelsius, MaxTemperatureCelsius, TemperatureDecimals)
+}
+
+// shelfLifeQ10 checks a shelf-life Q10.
+func shelfLifeQ10(v *rest.Validator, value *float64) bool {
+	return v.Decimal("shelf_life_q10", value, MinShelfLifeQ10, MaxShelfLifeQ10, ShelfLifeQ10Decimals)
 }
 
 // validate checks the request, recording errors in v, and returns the product it describes. The service
@@ -45,7 +52,10 @@ func (req *createRequest) validate(v *rest.Validator) NewProduct {
 	}
 	v.Text("name", &req.Name, 1, maxNameLength)
 	v.OptionalText("description", &req.Description, 1, maxDescriptionLength)
-	np := NewProduct{GTIN: req.GTIN, Name: req.Name, Description: req.Description}
+	np := NewProduct{GTIN: req.GTIN, Name: req.Name, Description: req.Description, ShelfLifeQ10: DefaultShelfLifeQ10}
+	if req.ShelfLifeQ10 != nil && shelfLifeQ10(v, req.ShelfLifeQ10) {
+		np.ShelfLifeQ10 = *req.ShelfLifeQ10
+	}
 	minValid := temperature(v, "min_temp_celsius", req.MinTempCelsius)
 	maxValid := temperature(v, "max_temp_celsius", req.MaxTempCelsius)
 	if minValid && maxValid {
@@ -58,7 +68,7 @@ func (req *createRequest) validate(v *rest.Validator) NewProduct {
 }
 
 // patchable lists the members of a product merge patch. The GTIN identifies the product and never changes.
-var patchable = []string{"name", "description", "min_temp_celsius", "max_temp_celsius", "is_active"}
+var patchable = []string{"name", "description", "min_temp_celsius", "max_temp_celsius", "shelf_life_q10", "is_active"}
 
 // readPatch checks a merge patch of a product, recording errors in v, and returns the changes it describes. A
 // patch that moves one bound past the other's stored value is caught when it is applied.
@@ -95,6 +105,13 @@ func readPatch(v *rest.Validator, patch rest.Patch) Patch {
 	changes.MaxTempCelsius = bound("max_temp_celsius")
 	if changes.MinTempCelsius != nil && changes.MaxTempCelsius != nil && *changes.MinTempCelsius >= *changes.MaxTempCelsius {
 		v.Add("min_temp_celsius", httpx.FieldOutOfRange, minBelowMax)
+	}
+	if q10 := rest.PatchField[float64](v, patch, "shelf_life_q10"); q10.Set {
+		if q10.Null {
+			v.Add("shelf_life_q10", httpx.FieldRequired, "cannot be null")
+		} else if shelfLifeQ10(v, &q10.Value) {
+			changes.ShelfLifeQ10 = &q10.Value
+		}
 	}
 	if active := rest.PatchField[bool](v, patch, "is_active"); active.Set {
 		if active.Null {

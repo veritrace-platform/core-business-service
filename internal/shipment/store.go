@@ -53,8 +53,8 @@ func (r repository) LockLot(ctx context.Context, lotID uuid.UUID) (lotSnapshot, 
 	}
 	return lotSnapshot{
 		ID: row.ID, GTIN: row.Gtin, ProductName: row.ProductName, MinTempCelsius: row.MinTempCelsius,
-		MaxTempCelsius: row.MaxTempCelsius, LotNumber: row.LotNumber, ExpirationDate: row.ExpirationDate,
-		Status: policy.LotStatus(row.Status),
+		MaxTempCelsius: row.MaxTempCelsius, ShelfLifeQ10: row.ShelfLifeQ10, LotNumber: row.LotNumber,
+		ProductionDate: row.ProductionDate, ExpirationDate: row.ExpirationDate, Status: policy.LotStatus(row.Status),
 	}, nil
 }
 
@@ -147,7 +147,8 @@ func (r repository) Insert(ctx context.Context, s newRow) (uuid.UUID, error) {
 		OwnerTenantID: s.OwnerTenantID, Sscc: s.SSCC, LotID: s.Lot.ID,
 		Quantity: int32(s.Quantity), //nolint:gosec // validated to fit an integer column
 		Gtin:     s.Lot.GTIN, ProductName: s.Lot.ProductName, LotNumber: s.Lot.LotNumber,
-		ExpirationDate: s.Lot.ExpirationDate, MinTempCelsius: s.Lot.MinTempCelsius, MaxTempCelsius: s.Lot.MaxTempCelsius,
+		ProductionDate: s.Lot.ProductionDate, ExpirationDate: s.Lot.ExpirationDate,
+		MinTempCelsius: s.Lot.MinTempCelsius, MaxTempCelsius: s.Lot.MaxTempCelsius, ShelfLifeQ10: s.Lot.ShelfLifeQ10,
 		OriginLocationID: s.Origin.LocationID, OriginGln: s.Origin.GLN, OriginName: s.Origin.Name,
 		OriginLatitude: s.Origin.Latitude, OriginLongitude: s.Origin.Longitude,
 		OriginGeoFenceRadiusMeters: int32(s.Origin.GeoFenceRadiusMeters), //nolint:gosec // 50–5000
@@ -383,9 +384,12 @@ func (r repository) AllEvents(ctx context.Context, id uuid.UUID) ([]event.Event,
 func fromRow(row queries.GetShipmentRow) Shipment {
 	return Shipment{
 		ID: row.ID, SSCC: row.Sscc, Status: policy.ShipmentStatus(row.Status), Quantity: int(row.Quantity),
-		Lot: LotRef{ID: row.LotID, LotNumber: row.LotNumber, ExpirationDate: row.ExpirationDate},
+		Lot: LotRef{
+			ID: row.LotID, LotNumber: row.LotNumber, ProductionDate: row.ProductionDate, ExpirationDate: row.ExpirationDate,
+		},
 		Product: ProductRef{
 			GTIN: row.Gtin, Name: row.ProductName, MinTempCelsius: row.MinTempCelsius, MaxTempCelsius: row.MaxTempCelsius,
+			ShelfLifeQ10: row.ShelfLifeQ10,
 		},
 		Origin: Facility{
 			LocationID: row.OriginLocationID, GLN: row.OriginGln, Name: row.OriginName, Latitude: row.OriginLatitude,

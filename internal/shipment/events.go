@@ -25,10 +25,12 @@ type createdPayload struct {
 	GTIN             string           `json:"gtin"`
 	ProductName      string           `json:"product_name"`
 	LotNumber        string           `json:"lot_number"`
+	ProductionDate   calendar.Date    `json:"production_date"`
 	ExpirationDate   calendar.Date    `json:"expiration_date"`
 	Quantity         int              `json:"quantity"`
 	MinTempCelsius   float64          `json:"min_temp_celsius"`
 	MaxTempCelsius   float64          `json:"max_temp_celsius"`
+	ShelfLifeQ10     float64          `json:"shelf_life_q10"`
 	Origin           facilityRef      `json:"origin"`
 	Destination      facilityRef      `json:"destination"`
 	Participants     []participantRef `json:"participants"`
@@ -42,11 +44,11 @@ func createdData(owner uuid.UUID, lot lotSnapshot, ns NewShipment, origin, desti
 	}
 	return createdPayload{
 		OwnerTenantID: owner, LotID: lot.ID, GTIN: lot.GTIN, ProductName: lot.ProductName, LotNumber: lot.LotNumber,
-		ExpirationDate: lot.ExpirationDate, Quantity: ns.Quantity, MinTempCelsius: lot.MinTempCelsius,
-		MaxTempCelsius: lot.MaxTempCelsius,
-		Origin:         facilityRef{LocationID: origin.LocationID, GLN: origin.GLN, Name: origin.Name},
-		Destination:    facilityRef{LocationID: destination.LocationID, GLN: destination.GLN, Name: destination.Name},
-		Participants:   refs, AssignedDriverID: ns.DriverUserID,
+		ProductionDate: lot.ProductionDate, ExpirationDate: lot.ExpirationDate, Quantity: ns.Quantity,
+		MinTempCelsius: lot.MinTempCelsius, MaxTempCelsius: lot.MaxTempCelsius, ShelfLifeQ10: lot.ShelfLifeQ10,
+		Origin:       facilityRef{LocationID: origin.LocationID, GLN: origin.GLN, Name: origin.Name},
+		Destination:  facilityRef{LocationID: destination.LocationID, GLN: destination.GLN, Name: destination.Name},
+		Participants: refs, AssignedDriverID: ns.DriverUserID,
 	}
 }
 

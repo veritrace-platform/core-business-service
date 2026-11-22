@@ -13,8 +13,8 @@ import (
 )
 
 // Lot is a production batch of one product. Its owner is the tenant that commissioned it; tenants that hold or
-// held stock of it see it too. It carries the product's GTIN, name, and temperature bounds as they were at
-// commissioning, so holders need no access to the owner's catalog.
+// held stock of it see it too. It carries the product's GTIN, name, temperature bounds, and shelf-life Q10 as they
+// were at commissioning, so holders need no access to the owner's catalog.
 type Lot struct {
 	ID                     uuid.UUID        `json:"id"`
 	OwnerTenantID          uuid.UUID        `json:"owner_tenant_id"`
@@ -23,6 +23,7 @@ type Lot struct {
 	ProductName            string           `json:"product_name"`
 	MinTempCelsius         float64          `json:"min_temp_celsius"`
 	MaxTempCelsius         float64          `json:"max_temp_celsius"`
+	ShelfLifeQ10           float64          `json:"shelf_life_q10"`
 	LotNumber              string           `json:"lot_number"`
 	ProductionDate         calendar.Date    `json:"production_date"`
 	ExpirationDate         calendar.Date    `json:"expiration_date"`
@@ -51,6 +52,7 @@ type Product struct {
 	Name           string
 	MinTempCelsius float64
 	MaxTempCelsius float64
+	ShelfLifeQ10   float64
 	IsActive       bool
 }
 

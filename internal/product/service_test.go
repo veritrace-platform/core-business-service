@@ -90,7 +90,10 @@ func roleDenied(err error) bool {
 func TestCreate(t *testing.T) {
 	store := newMemStore()
 	svc := product.NewService(store)
-	chilled := product.NewProduct{GTIN: "08930001000018", Name: "Chilled milk", MinTempCelsius: 2, MaxTempCelsius: 8}
+	chilled := product.NewProduct{
+		GTIN: "08930001000018", Name: "Chilled milk", MinTempCelsius: 2, MaxTempCelsius: 8,
+		ShelfLifeQ10: product.DefaultShelfLifeQ10,
+	}
 
 	// Warehouse managers maintain products as well as admins.
 	for _, role := range []identity.Role{identity.RoleAdmin, identity.RoleWarehouseManager} {

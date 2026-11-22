@@ -19,7 +19,8 @@ INSERT INTO core.products (
     name,
     description,
     min_temp_celsius,
-    max_temp_celsius
+    max_temp_celsius,
+    shelf_life_q10
 )
 VALUES (
     $1,
@@ -27,7 +28,8 @@ VALUES (
     $3,
     $4,
     $5,
-    $6
+    $6,
+    $7
 )
 RETURNING
     id,
@@ -36,6 +38,7 @@ RETURNING
     description,
     min_temp_celsius,
     max_temp_celsius,
+    shelf_life_q10,
     is_active,
     created_at,
     updated_at
@@ -48,6 +51,7 @@ type CreateProductParams struct {
 	Description    *string
 	MinTempCelsius float64
 	MaxTempCelsius float64
+	ShelfLifeQ10   float64
 }
 
 type CreateProductRow struct {
@@ -57,6 +61,7 @@ type CreateProductRow struct {
 	Description    *string
 	MinTempCelsius float64
 	MaxTempCelsius float64
+	ShelfLifeQ10   float64
 	IsActive       bool
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
@@ -70,6 +75,7 @@ func (q *Queries) CreateProduct(ctx context.Context, arg CreateProductParams) (C
 		arg.Description,
 		arg.MinTempCelsius,
 		arg.MaxTempCelsius,
+		arg.ShelfLifeQ10,
 	)
 	var i CreateProductRow
 	err := row.Scan(
@@ -79,6 +85,7 @@ func (q *Queries) CreateProduct(ctx context.Context, arg CreateProductParams) (C
 		&i.Description,
 		&i.MinTempCelsius,
 		&i.MaxTempCelsius,
+		&i.ShelfLifeQ10,
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -107,6 +114,7 @@ SELECT
     description,
     min_temp_celsius,
     max_temp_celsius,
+    shelf_life_q10,
     is_active,
     created_at,
     updated_at
@@ -121,6 +129,7 @@ type GetProductRow struct {
 	Description    *string
 	MinTempCelsius float64
 	MaxTempCelsius float64
+	ShelfLifeQ10   float64
 	IsActive       bool
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
@@ -136,6 +145,7 @@ func (q *Queries) GetProduct(ctx context.Context, id uuid.UUID) (GetProductRow, 
 		&i.Description,
 		&i.MinTempCelsius,
 		&i.MaxTempCelsius,
+		&i.ShelfLifeQ10,
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -151,6 +161,7 @@ SELECT
     description,
     min_temp_celsius,
     max_temp_celsius,
+    shelf_life_q10,
     is_active,
     created_at,
     updated_at
@@ -176,6 +187,7 @@ type ListProductsRow struct {
 	Description    *string
 	MinTempCelsius float64
 	MaxTempCelsius float64
+	ShelfLifeQ10   float64
 	IsActive       bool
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
@@ -202,6 +214,7 @@ func (q *Queries) ListProducts(ctx context.Context, arg ListProductsParams) ([]L
 			&i.Description,
 			&i.MinTempCelsius,
 			&i.MaxTempCelsius,
+			&i.ShelfLifeQ10,
 			&i.IsActive,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -222,8 +235,9 @@ SET name = coalesce($1, name),
     description = CASE WHEN $2::boolean THEN $3 ELSE description END,
     min_temp_celsius = coalesce($4, min_temp_celsius),
     max_temp_celsius = coalesce($5, max_temp_celsius),
-    is_active = coalesce($6, is_active)
-WHERE id = $7
+    shelf_life_q10 = coalesce($6, shelf_life_q10),
+    is_active = coalesce($7, is_active)
+WHERE id = $8
 RETURNING
     id,
     gtin,
@@ -231,6 +245,7 @@ RETURNING
     description,
     min_temp_celsius,
     max_temp_celsius,
+    shelf_life_q10,
     is_active,
     created_at,
     updated_at
@@ -242,6 +257,7 @@ type UpdateProductParams struct {
 	Description    *string
 	MinTempCelsius *float64
 	MaxTempCelsius *float64
+	ShelfLifeQ10   *float64
 	IsActive       *bool
 	ID             uuid.UUID
 }
@@ -253,6 +269,7 @@ type UpdateProductRow struct {
 	Description    *string
 	MinTempCelsius float64
 	MaxTempCelsius float64
+	ShelfLifeQ10   float64
 	IsActive       bool
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
@@ -265,6 +282,7 @@ func (q *Queries) UpdateProduct(ctx context.Context, arg UpdateProductParams) (U
 		arg.Description,
 		arg.MinTempCelsius,
 		arg.MaxTempCelsius,
+		arg.ShelfLifeQ10,
 		arg.IsActive,
 		arg.ID,
 	)
@@ -276,6 +294,7 @@ func (q *Queries) UpdateProduct(ctx context.Context, arg UpdateProductParams) (U
 		&i.Description,
 		&i.MinTempCelsius,
 		&i.MaxTempCelsius,
+		&i.ShelfLifeQ10,
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,

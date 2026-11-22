@@ -107,8 +107,15 @@ func TestCreateProduct(t *testing.T) {
 		t.Fatalf("status = %d, Location = %q, body %s", rec.Code, rec.Header().Get("Location"), rec.Body)
 	}
 	np := fake.gotNew
-	if np.GTIN != "08930001000018" || np.Name != "Chilled milk" || np.Description != nil || np.MinTempCelsius != 2 || np.MaxTempCelsius != 8.5 {
-		t.Errorf("new product = %+v, want trimmed values and no description", np)
+	if np.GTIN != "08930001000018" || np.Name != "Chilled milk" || np.Description != nil || np.MinTempCelsius != 2 ||
+		np.MaxTempCelsius != 8.5 || np.ShelfLifeQ10 != product.DefaultShelfLifeQ10 {
+		t.Errorf("new product = %+v, want trimmed values, no description, and the default Q10", np)
+	}
+	fake = &fakeProducts{}
+	call(t, fake, http.MethodPost, "/api/v1/products",
+		`{"gtin":"08930001000018","name":"Yogurt","min_temp_celsius":2,"max_temp_celsius":6,"shelf_life_q10":2.25}`)
+	if fake.gotNew.ShelfLifeQ10 != 2.25 {
+		t.Errorf("shelf_life_q10 = %v, want 2.25", fake.gotNew.ShelfLifeQ10)
 	}
 
 	const name = `"name":"N","min_temp_celsius":-25,"max_temp_celsius":-18`
@@ -126,6 +133,9 @@ func TestCreateProduct(t *testing.T) {
 		{`{"gtin":"08930001000018","name":"N","min_temp_celsius":2.125,"max_temp_celsius":8}`, "min_temp_celsius", httpx.FieldInvalidFormat, http.StatusBadRequest},
 		{`{"gtin":"08930001000018","name":"N","min_temp_celsius":8,"max_temp_celsius":8}`, "min_temp_celsius", httpx.FieldOutOfRange, http.StatusBadRequest},
 		{`{"gtin":"08930001000018",` + name + `,"is_active":false}`, "is_active", httpx.FieldUnknown, http.StatusBadRequest},
+		{`{"gtin":"08930001000018",` + name + `,"shelf_life_q10":0.9}`, "shelf_life_q10", httpx.FieldOutOfRange, http.StatusBadRequest},
+		{`{"gtin":"08930001000018",` + name + `,"shelf_life_q10":10.5}`, "shelf_life_q10", httpx.FieldOutOfRange, http.StatusBadRequest},
+		{`{"gtin":"08930001000018",` + name + `,"shelf_life_q10":2.125}`, "shelf_life_q10", httpx.FieldInvalidFormat, http.StatusBadRequest},
 	}
 	for _, tt := range tests {
 		rec := call(t, &fakeProducts{}, http.MethodPost, "/api/v1/products", tt.body)
@@ -140,18 +150,20 @@ func TestUpdateProduct(t *testing.T) {
 	id := uuid.New()
 	fake := &fakeProducts{}
 	rec := call(t, fake, http.MethodPatch, "/api/v1/products/"+id.String(),
-		`{"name":" Chilled milk 1 L ","description":"Pasteurized","min_temp_celsius":1.5,"max_temp_celsius":6,"is_active":false}`)
+		`{"name":" Chilled milk 1 L ","description":"Pasteurized","min_temp_celsius":1.5,"max_temp_celsius":6,"shelf_life_q10":4,"is_active":false}`)
 	if rec.Code != http.StatusOK || fake.gotID != id {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body)
 	}
 	p := fake.gotPatch
 	if p.Name == nil || *p.Name != "Chilled milk 1 L" || p.Description == nil || *p.Description != "Pasteurized" ||
-		p.ClearDescription || *p.MinTempCelsius != 1.5 || *p.MaxTempCelsius != 6 || p.IsActive == nil || *p.IsActive {
+		p.ClearDescription || *p.MinTempCelsius != 1.5 || *p.MaxTempCelsius != 6 || p.ShelfLifeQ10 == nil ||
+		*p.ShelfLifeQ10 != 4 || p.IsActive == nil || *p.IsActive {
 		t.Errorf("patch = %+v", p)
 	}
 	fake = &fakeProducts{}
 	call(t, fake, http.MethodPatch, "/api/v1/products/"+id.String(), `{"description":null}`)
-	if p := fake.gotPatch; !p.ClearDescription || p.Description != nil || p.Name != nil || p.MinTempCelsius != nil {
+	if p := fake.gotPatch; !p.ClearDescription || p.Description != nil || p.Name != nil || p.MinTempCelsius != nil ||
+		p.ShelfLifeQ10 != nil {
 		t.Errorf("clearing the description: patch = %+v", p)
 	}
 
@@ -166,6 +178,8 @@ func TestUpdateProduct(t *testing.T) {
 		{`{"max_temp_celsius":4.001}`, "max_temp_celsius", httpx.FieldInvalidFormat},
 		{`{"min_temp_celsius":9,"max_temp_celsius":4}`, "min_temp_celsius", httpx.FieldOutOfRange},
 		{`{"is_active":null}`, "is_active", httpx.FieldRequired},
+		{`{"shelf_life_q10":null}`, "shelf_life_q10", httpx.FieldRequired},
+		{`{"shelf_life_q10":11}`, "shelf_life_q10", httpx.FieldOutOfRange},
 	}
 	for _, tt := range tests {
 		rec := call(t, &fakeProducts{}, http.MethodPatch, "/api/v1/products/"+id.String(), tt.body)

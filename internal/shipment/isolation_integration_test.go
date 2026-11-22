@@ -32,11 +32,11 @@ func TestShipmentIsolation(t *testing.T) {
 	w.db.AssertDenied(t, w.stranger.ID, `UPDATE core.shipment_participants SET tenant_code = 'X' WHERE shipment_id = $1`, sh.ID)
 	// A tenant cannot create a shipment in another tenant's name.
 	w.db.AssertDenied(t, w.stranger.ID, `
-		INSERT INTO core.shipments (owner_tenant_id, sscc, lot_id, quantity, gtin, product_name, lot_number, expiration_date,
-		    min_temp_celsius, max_temp_celsius, origin_location_id, origin_gln, origin_name, origin_latitude, origin_longitude,
+		INSERT INTO core.shipments (owner_tenant_id, sscc, lot_id, quantity, gtin, product_name, lot_number,
+		    production_date, expiration_date, min_temp_celsius, max_temp_celsius, shelf_life_q10, origin_location_id, origin_gln, origin_name, origin_latitude, origin_longitude,
 		    origin_geo_fence_radius_meters, destination_location_id, destination_gln, destination_name, destination_latitude,
 		    destination_longitude, destination_geo_fence_radius_meters, consignee_tenant_id, carrier_tenant_id, created_by)
-		VALUES ($1, '999999999999999999', $2, 1, $3, 'X', 'X', current_date, 2, 8, $4, $5, 'X', 0, 0, 200,
+		VALUES ($1, '999999999999999999', $2, 1, $3, 'X', 'X', current_date, current_date, 2, 8, 3, $4, $5, 'X', 0, 0, 200,
 		        $6, $7, 'X', 0, 0, 200, $8, $1, $9)`,
 		w.owner.ID, w.lot.ID, w.product.GTIN, w.plant.ID, w.plant.GLN, w.store.ID, w.store.GLN, w.consignee.ID, w.owner.Admin.ID)
 }
