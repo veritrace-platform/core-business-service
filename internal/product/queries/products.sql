@@ -6,6 +6,7 @@ SELECT
     description,
     min_temp_celsius,
     max_temp_celsius,
+    shelf_life_q10,
     is_active,
     created_at,
     updated_at
@@ -24,6 +25,7 @@ SELECT
     description,
     min_temp_celsius,
     max_temp_celsius,
+    shelf_life_q10,
     is_active,
     created_at,
     updated_at
@@ -37,7 +39,8 @@ INSERT INTO core.products (
     name,
     description,
     min_temp_celsius,
-    max_temp_celsius
+    max_temp_celsius,
+    shelf_life_q10
 )
 VALUES (
     sqlc.arg(tenant_id),
@@ -45,7 +48,8 @@ VALUES (
     sqlc.arg(name),
     sqlc.narg(description),
     sqlc.arg(min_temp_celsius),
-    sqlc.arg(max_temp_celsius)
+    sqlc.arg(max_temp_celsius),
+    sqlc.arg(shelf_life_q10)
 )
 RETURNING
     id,
@@ -54,6 +58,7 @@ RETURNING
     description,
     min_temp_celsius,
     max_temp_celsius,
+    shelf_life_q10,
     is_active,
     created_at,
     updated_at;
@@ -64,6 +69,7 @@ SET name = coalesce(sqlc.narg(name), name),
     description = CASE WHEN sqlc.arg(set_description)::boolean THEN sqlc.narg(description) ELSE description END,
     min_temp_celsius = coalesce(sqlc.narg(min_temp_celsius), min_temp_celsius),
     max_temp_celsius = coalesce(sqlc.narg(max_temp_celsius), max_temp_celsius),
+    shelf_life_q10 = coalesce(sqlc.narg(shelf_life_q10), shelf_life_q10),
     is_active = coalesce(sqlc.narg(is_active), is_active)
 WHERE id = sqlc.arg(id)
 RETURNING
@@ -73,6 +79,7 @@ RETURNING
     description,
     min_temp_celsius,
     max_temp_celsius,
+    shelf_life_q10,
     is_active,
     created_at,
     updated_at;

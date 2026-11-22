@@ -37,6 +37,7 @@ type Participant struct {
 type LotRef struct {
 	ID             uuid.UUID     `json:"id"`
 	LotNumber      string        `json:"lot_number"`
+	ProductionDate calendar.Date `json:"production_date"`
 	ExpirationDate calendar.Date `json:"expiration_date"`
 }
 
@@ -46,6 +47,7 @@ type ProductRef struct {
 	Name           string  `json:"name"`
 	MinTempCelsius float64 `json:"min_temp_celsius"`
 	MaxTempCelsius float64 `json:"max_temp_celsius"`
+	ShelfLifeQ10   float64 `json:"shelf_life_q10"`
 }
 
 // Facility is the origin or destination of a shipment as it was when the shipment was created.

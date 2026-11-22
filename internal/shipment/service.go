@@ -77,7 +77,9 @@ type lotSnapshot struct {
 	ProductName    string
 	MinTempCelsius float64
 	MaxTempCelsius float64
+	ShelfLifeQ10   float64
 	LotNumber      string
+	ProductionDate calendar.Date
 	ExpirationDate calendar.Date
 	Status         policy.LotStatus
 }

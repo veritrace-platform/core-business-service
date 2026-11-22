@@ -78,7 +78,7 @@ func (r repository) LockProduct(ctx context.Context, id uuid.UUID) (Product, err
 	}
 	return Product{
 		ID: row.ID, GTIN: row.Gtin, Name: row.Name, MinTempCelsius: row.MinTempCelsius,
-		MaxTempCelsius: row.MaxTempCelsius, IsActive: row.IsActive,
+		MaxTempCelsius: row.MaxTempCelsius, ShelfLifeQ10: row.ShelfLifeQ10, IsActive: row.IsActive,
 	}, nil
 }
 
@@ -96,8 +96,8 @@ func (r repository) LockLocation(ctx context.Context, id uuid.UUID) (bool, error
 func (r repository) Create(ctx context.Context, tenantID, createdBy uuid.UUID, nl NewLot, product Product) (Lot, error) {
 	row, err := r.q.CreateLot(ctx, queries.CreateLotParams{
 		TenantID: tenantID, ProductID: product.ID, Gtin: product.GTIN, ProductName: product.Name,
-		MinTempCelsius: product.MinTempCelsius, MaxTempCelsius: product.MaxTempCelsius, LotNumber: nl.LotNumber,
-		ProductionDate: nl.ProductionDate, ExpirationDate: nl.ExpirationDate,
+		MinTempCelsius: product.MinTempCelsius, MaxTempCelsius: product.MaxTempCelsius,
+		ShelfLifeQ10: product.ShelfLifeQ10, LotNumber: nl.LotNumber, ProductionDate: nl.ProductionDate, ExpirationDate: nl.ExpirationDate,
 		QuantityCommissioned:   int32(nl.Quantity), //nolint:gosec // validated to fit an integer column
 		CommissionedLocationID: nl.LocationID, CreatedBy: createdBy,
 	})
@@ -119,8 +119,8 @@ func (r repository) ApplyMovement(ctx context.Context, m inventory.Movement) err
 func fromRow(row queries.GetLotRow) Lot {
 	return Lot{
 		ID: row.ID, OwnerTenantID: row.TenantID, ProductID: row.ProductID, GTIN: row.Gtin, ProductName: row.ProductName,
-		MinTempCelsius: row.MinTempCelsius, MaxTempCelsius: row.MaxTempCelsius, LotNumber: row.LotNumber,
-		ProductionDate: row.ProductionDate, ExpirationDate: row.ExpirationDate,
+		MinTempCelsius: row.MinTempCelsius, MaxTempCelsius: row.MaxTempCelsius, ShelfLifeQ10: row.ShelfLifeQ10,
+		LotNumber: row.LotNumber, ProductionDate: row.ProductionDate, ExpirationDate: row.ExpirationDate,
 		QuantityCommissioned: int(row.QuantityCommissioned), CommissionedLocationID: row.CommissionedLocationID,
 		Status: policy.LotStatus(row.Status), RecalledAt: row.RecalledAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}

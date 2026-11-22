@@ -101,8 +101,8 @@ func (s *Service) Create(ctx context.Context, p identity.Principal, np NewProduc
 	return created, err
 }
 
-// Update changes a product of the caller's tenant. New temperature bounds apply to lots commissioned
-// afterwards; existing lots and shipments keep the bounds they were created with.
+// Update changes a product of the caller's tenant. New temperature bounds and a new shelf-life Q10 apply to lots
+// commissioned afterwards; existing lots and shipments keep the values they were created with.
 func (s *Service) Update(ctx context.Context, p identity.Principal, id uuid.UUID, patch Patch) (Product, error) {
 	// A patch cannot change the GTIN, which passed the prefix check when the product was created.
 	if err := authorize(p, policy.ManageProducts, policy.Known(map[policy.Check]bool{policy.GTINPrefix: true})); err != nil {

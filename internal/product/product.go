@@ -1,5 +1,5 @@
 // Package product manages a tenant's trade items, identified by GTIN-14, with the temperature range that the
-// cold chain must hold (data-model.md §3.2).
+// cold chain must hold and the Q10 of their shelf life (data-model.md §3.2; cold-chain-monitoring.md §8).
 package product
 
 import (
@@ -17,7 +17,17 @@ const (
 	TemperatureDecimals   = 2
 )
 
-// Product is a trade item of one tenant.
+// Limits and default of a product's shelf-life Q10, and its precision as stored in numeric(4, 2). The default
+// matches the activation energy that mean kinetic temperature assumes (ADR-0024).
+const (
+	MinShelfLifeQ10      = 1
+	MaxShelfLifeQ10      = 10
+	DefaultShelfLifeQ10  = 3.0
+	ShelfLifeQ10Decimals = 2
+)
+
+// Product is a trade item of one tenant. ShelfLifeQ10 is how many times faster its goods age for every 10 °C above
+// MaxTempCelsius.
 type Product struct {
 	ID             uuid.UUID `json:"id"`
 	GTIN           string    `json:"gtin"`
@@ -25,6 +35,7 @@ type Product struct {
 	Description    *string   `json:"description"`
 	MinTempCelsius float64   `json:"min_temp_celsius"`
 	MaxTempCelsius float64   `json:"max_temp_celsius"`
+	ShelfLifeQ10   float64   `json:"shelf_life_q10"`
 	IsActive       bool      `json:"is_active"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
@@ -37,6 +48,7 @@ type NewProduct struct {
 	Description    *string
 	MinTempCelsius float64
 	MaxTempCelsius float64
+	ShelfLifeQ10   float64
 }
 
 // Filter selects a page of products, newest first.
@@ -57,6 +69,7 @@ type Patch struct {
 	ClearDescription bool
 	MinTempCelsius   *float64
 	MaxTempCelsius   *float64
+	ShelfLifeQ10     *float64
 	IsActive         *bool
 }
 
